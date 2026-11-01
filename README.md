@@ -15,7 +15,7 @@ An event ticketing system built with the MERN stack: organisers publish events w
 - **Expired holds**: treated as free immediately; a cleanup job also tidies them up every 60 seconds
 - **My bookings**: list and view your own bookings with event and seat details
 - **Frontend**: React app covering the whole user flow. Browse events (city filter, pagination), pick up to 6 seats on a live seat map (refreshes every 5 seconds), hold them, pay on a checkout page with a countdown (payment is simulated), get a ticket stub, and view or cancel bookings in a table. Organisers get a dashboard with seat counts per event, plus forms to create, edit and cancel events
-- **Tests**: 85 integration tests against an in-memory MongoDB, including a concurrency test where 20 users grab the same seat at once and exactly one wins
+- **Tests**: 96 integration tests against an in-memory MongoDB, including a concurrency test where 20 users grab the same seat at once and exactly one wins
 - **Load test**: 500 simultaneous users against the real server + Atlas; no seat ever double-booked. A fast-fail check made "seat already taken" bursts about 3× faster ([results](docs/load-test-results.md))
 
 ## Tech stack
@@ -218,9 +218,21 @@ Send the token as `Authorization: Bearer <token>`. Prices are stored in paise (�
 
 **Booking lifecycle:** `pending` (seats held) → `confirmed` (seats booked), or → `expired` (hold ran out) / `cancelled` (by the user, or when the organiser cancels the event).
 
+## Deployment
+
+The app is set up for free hosting: **Render** (API), **Vercel** (frontend) and **MongoDB Atlas** (database). Follow the step-by-step guide in [docs/DEPLOY.md](docs/DEPLOY.md).
+
+Production hardening already in place:
+
+- **Security headers** with helmet, and CORS limited to the origins in `CLIENT_URL` (comma-separated list)
+- **Rate limiting** (429 with a clear message): login and sign-up 20 per 15 minutes per IP; seat holds 30 per 5 minutes per user. Off when `NODE_ENV=test`
+- **No stack traces or internal error messages** in responses when `NODE_ENV=production`; unknown routes and broken JSON bodies get JSON errors
+- **`trust proxy`** set for Render, so rate limits see the real visitor IP
+- **CI** (`.github/workflows/ci.yml`): every push and pull request runs server lint and tests, and client lint and build, on Node 22
+
 ## Roadmap
 
 - ~~**Seat hold & booking with concurrency safety**~~ (done)
+- ~~**React frontend**~~ (done)
+- ~~**Deployment setup**~~ (done, see [docs/DEPLOY.md](docs/DEPLOY.md))
 - **Payment simulation**: confirm currently counts as "paid"; next is a fake payment step that can succeed or fail
-- **React frontend**: browse events, pick seats on a seat map, view bookings
-- **Deployment**: host the API and frontend, connected to MongoDB Atlas

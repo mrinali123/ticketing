@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import useFetch from '../hooks/useFetch.js';
 import useTitle from '../hooks/useTitle.js';
@@ -25,6 +26,16 @@ export default function EventsPage() {
   const { data: cities = [] } = useFetch('/api/events/cities');
 
   const result = events.data; // { data, page, limit, total }
+
+  // Free hosting puts the API to sleep when nobody uses it, and the first request then takes
+  // up to a minute. If the first load is still going after 5 seconds, say why.
+  const [slowStart, setSlowStart] = useState(false);
+  const firstLoadDone = Boolean(result) || Boolean(events.error);
+  useEffect(() => {
+    if (firstLoadDone) return undefined;
+    const timer = setTimeout(() => setSlowStart(true), 5000);
+    return () => clearTimeout(timer);
+  }, [firstLoadDone]);
 
   function changeCity(e) {
     const next = e.target.value;
@@ -78,7 +89,16 @@ export default function EventsPage() {
             </button>
           </div>
         ) : !result ? (
-          <Loading>Loading events...</Loading>
+          <div className="space-y-3">
+            <Loading>Loading events...</Loading>
+            {slowStart && (
+              <div className="max-w-md">
+                <Notice>
+                  The server is waking up (free hosting), this can take up to a minute.
+                </Notice>
+              </div>
+            )}
+          </div>
         ) : result.data.length === 0 ? (
           <p className="text-sm text-muted">
             {city ? `No upcoming events in ${city}.` : 'No upcoming events right now.'}
