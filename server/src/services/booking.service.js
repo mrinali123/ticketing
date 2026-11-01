@@ -58,13 +58,31 @@ export async function holdSeats(userId, { eventId, seatLabels, idempotencyKey })
     if (existing) return { booking: existing, created: false };
   }
 
+  // One quick read of the requested seats, before any transaction
+  const found = await Seat.find({ event: event._id, label: { $in: seatLabels } })
+    .select('label status holdExpiresAt')
+    .lean();
+
   // Clear 400 for labels that don't exist at all (e.g. "Z99"), instead of a misleading 409 later
-  const found = await Seat.find({ event: event._id, label: { $in: seatLabels } }).select('label');
   if (found.length !== seatLabels.length) {
     const foundLabels = new Set(found.map((s) => s.label));
     const missing = seatLabels.filter((label) => !foundLabels.has(label));
     throw httpError(400, `Seat(s) not found: ${missing.join(', ')}`);
   }
+
+  // FAST FAIL: if a seat is clearly taken, say 409 now instead of opening a transaction that is
+  // bound to fail. Under load (e.g. 500 people wanting one seat) this stops hundreds of doomed
+  // transactions from colliding, retrying and waiting for database connections.
+  //
+  // This is ONLY an optimisation, never the safety check. A seat can still change between this
+  // read and the update below (the read-then-write race). A seat that looks free here may be
+  // taken a millisecond later, and the atomic conditional update inside the transaction is what
+  // catches that. If this block were deleted, booking would still be correct, just slower.
+  const now = new Date();
+  const taken = found.find(
+    (s) => s.status === 'booked' || (s.status === 'held' && s.holdExpiresAt > now),
+  );
+  if (taken) throw httpError(409, `Seat ${taken.label} is no longer available`);
 
   try {
     const booking = await inTransaction(async (session) => {

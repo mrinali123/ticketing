@@ -1,0 +1,73 @@
+@baseUrl = http://localhost:5000
+
+# Run these top to bottom. Seats J5 and J6 are freed again by the last request (Cancel),
+# so the whole file can be re-run. If you stop halfway, they free up on their own after 5 minutes.
+
+### User 1 login: seeded user Arjun (expect 200 + token)
+# @name user1
+POST {{baseUrl}}/api/auth/login
+Content-Type: application/json
+
+{
+  "email": "arjun@example.com",
+  "password": "Password123!"
+}
+
+### User 2 login: seeded user Priya, used to compete for the same seat (expect 200 + token)
+# @name user2
+POST {{baseUrl}}/api/auth/login
+Content-Type: application/json
+
+{
+  "email": "priya@example.com",
+  "password": "Password123!"
+}
+
+### List events: we book seats on the first (soonest) upcoming event (expect 200)
+# @name events
+GET {{baseUrl}}/api/events?limit=1
+
+### Hold 2 seats as user 1 with a fresh Idempotency-Key (expect 201, status "pending")
+# @name hold
+POST {{baseUrl}}/api/bookings/hold
+Authorization: Bearer {{user1.response.body.token}}
+Idempotency-Key: {{$guid}}
+Content-Type: application/json
+
+{
+  "eventId": "{{events.response.body.$.data[0]._id}}",
+  "seatLabels": ["J5", "J6"]
+}
+
+### Repeat the same hold with the SAME Idempotency-Key, like a client retrying after a timeout (expect 200, same _id as above, no new booking)
+POST {{baseUrl}}/api/bookings/hold
+Authorization: Bearer {{user1.response.body.token}}
+Idempotency-Key: {{hold.request.headers.Idempotency-Key}}
+Content-Type: application/json
+
+{
+  "eventId": "{{events.response.body.$.data[0]._id}}",
+  "seatLabels": ["J5", "J6"]
+}
+
+### User 2 tries to hold a seat user 1 is holding (expect 409 "Seat J5 is no longer available")
+POST {{baseUrl}}/api/bookings/hold
+Authorization: Bearer {{user2.response.body.token}}
+Content-Type: application/json
+
+{
+  "eventId": "{{events.response.body.$.data[0]._id}}",
+  "seatLabels": ["J5"]
+}
+
+### Confirm as user 1: simulated payment, held seats become booked (expect 200, status "confirmed"; 409 if 5 minutes have passed)
+POST {{baseUrl}}/api/bookings/{{hold.response.body._id}}/confirm
+Authorization: Bearer {{user1.response.body.token}}
+
+### My bookings as user 1: newest first, with event and seat details (expect 200)
+GET {{baseUrl}}/api/bookings/me
+Authorization: Bearer {{user1.response.body.token}}
+
+### Cancel as user 1: booking becomes "cancelled" and J5/J6 are available again (expect 200)
+POST {{baseUrl}}/api/bookings/{{hold.response.body._id}}/cancel
+Authorization: Bearer {{user1.response.body.token}}

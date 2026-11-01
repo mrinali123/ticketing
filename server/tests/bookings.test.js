@@ -1,5 +1,6 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { setTimeout as sleep } from 'node:timers/promises';
+import mongoose from 'mongoose';
 import Booking from '../src/models/Booking.js';
 import Event from '../src/models/Event.js';
 import Seat from '../src/models/Seat.js';
@@ -7,6 +8,11 @@ import { expireHolds } from '../src/jobs/expireHolds.js';
 import { api, createUserWithToken, createEventWithSeats, daysFromNow } from './helpers.js';
 
 let organiser, alice, bob, event;
+
+// Undo any vi.spyOn() so one test's fake can't leak into the next
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 beforeEach(async () => {
   organiser = await createUserWithToken({ role: 'organiser' });
@@ -118,7 +124,41 @@ describe('POST /api/bookings/hold', () => {
 
     expect(res.status).toBe(409);
     expect(res.body.message).toBe('Seat A2 is no longer available');
-    // A1 was claimed before A2 failed, but the transaction rolled it back
+    expect(await seatStatuses(['A1', 'A3'])).toEqual({ A1: 'available', A3: 'available' });
+    expect(await Booking.countDocuments({ user: bob.user._id })).toBe(0);
+  });
+
+  it('fast path: a clearly taken seat gets 409 without starting a transaction', async () => {
+    await hold(alice, ['A2']);
+    const startSession = vi.spyOn(mongoose, 'startSession');
+
+    const res = await hold(bob, ['A1', 'A2']);
+
+    expect(res.status).toBe(409);
+    expect(res.body.message).toBe('Seat A2 is no longer available');
+    expect(startSession).not.toHaveBeenCalled();
+  });
+
+  it('still rolls back if the seat is taken AFTER the quick read (stale read)', async () => {
+    await hold(alice, ['A2']);
+
+    // Make the quick pre-check read lie: it reports every seat as free, like a read that
+    // happened just before Alice's hold. Only the atomic update can catch this now.
+    vi.spyOn(Seat, 'find').mockReturnValueOnce({
+      select: () => ({
+        lean: async () =>
+          ['A1', 'A2', 'A3'].map((label) => ({ label, status: 'available', holdExpiresAt: null })),
+      }),
+    });
+    const startSession = vi.spyOn(mongoose, 'startSession');
+
+    const res = await hold(bob, ['A1', 'A2', 'A3']);
+
+    expect(res.status).toBe(409);
+    expect(res.body.message).toBe('Seat A2 is no longer available');
+    // Proves the 409 came from inside the transaction, not from the fast path
+    expect(startSession).toHaveBeenCalled();
+    // A1 WAS claimed inside the transaction before A2 failed; the rollback undid it
     expect(await seatStatuses(['A1', 'A3'])).toEqual({ A1: 'available', A3: 'available' });
     expect(await Booking.countDocuments({ user: bob.user._id })).toBe(0);
   });

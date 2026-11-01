@@ -13,7 +13,8 @@
     "seed": "node scripts/seed.js",
     "test:expiry": "node scripts/test-expired-token.js",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "loadtest": "node loadtest/run.js"
   },
   "keywords": [],
   "author": "",
