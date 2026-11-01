@@ -6,6 +6,7 @@ import TextField from '../components/TextField.jsx';
 import Notice from '../components/Notice.jsx';
 import { MIN_PASSWORD_LENGTH, validateRegister } from '../utils/validate.js';
 import useTitle from '../hooks/useTitle.js';
+import useInFlight from '../hooks/useInFlight.js';
 
 export default function RegisterPage() {
   useTitle('Create an account');
@@ -15,7 +16,8 @@ export default function RegisterPage() {
   const [form, setForm] = useState({ name: '', email: '', password: '' });
   const [errors, setErrors] = useState({});
   const [serverError, setServerError] = useState('');
-  const [submitting, setSubmitting] = useState(false);
+  const [createdButNotLoggedIn, setCreatedButNotLoggedIn] = useState(false);
+  const [submitting, runOnce] = useInFlight(); // one sign-up request at a time
 
   if (user) return <Navigate to="/" replace />;
 
@@ -25,27 +27,46 @@ export default function RegisterPage() {
     setErrors((errs) => ({ ...errs, [name]: undefined }));
   }
 
-  async function handleSubmit(e) {
+  function handleSubmit(e) {
     e.preventDefault();
-    setServerError('');
 
-    const found = validateRegister(form);
-    setErrors(found);
-    if (Object.keys(found).length > 0) return;
+    // runOnce ignores this whole function if a sign-up request is already running
+    runOnce(async () => {
+      setServerError('');
+      const found = validateRegister(form);
+      setErrors(found);
+      if (Object.keys(found).length > 0) return;
 
-    setSubmitting(true);
-    try {
-      await register(form.name.trim(), form.email.trim(), form.password);
-      navigate('/', { replace: true });
-    } catch (err) {
-      // 409 = email taken: show it next to the email field, everything else above the form
-      if (err.status === 409) {
-        setErrors({ email: 'That email already has an account. Try logging in instead.' });
-      } else {
-        setServerError(err.message);
+      try {
+        await register(form.name.trim(), form.email.trim(), form.password);
+        navigate('/', { replace: true });
+      } catch (err) {
+        if (err.accountCreated) {
+          // Sign-up worked; only the automatic login after it failed
+          setCreatedButNotLoggedIn(true);
+        } else if (err.status === 409) {
+          // email taken: show it next to the email field
+          setErrors({ email: 'That email already has an account. Try logging in instead.' });
+        } else {
+          setServerError(err.message);
+        }
       }
-      setSubmitting(false);
-    }
+    });
+  }
+
+  if (createdButNotLoggedIn) {
+    return (
+      <div className="mx-auto max-w-sm">
+        <h1 className="text-xl">Account created</h1>
+        <p className="mt-2 text-sm text-muted">
+          Your account for <span className="text-ink">{form.email.trim()}</span> is ready, but we
+          couldn't log you in automatically. Log in with the password you just chose.
+        </p>
+        <p className="mt-4 text-sm">
+          <Link to="/login">Go to log in</Link>
+        </p>
+      </div>
+    );
   }
 
   return (
@@ -100,6 +121,9 @@ export default function RegisterPage() {
 
       <p className="mt-4 text-sm text-muted">
         Already have an account? <Link to="/login">Log in</Link>
+      </p>
+      <p className="mt-2 text-sm text-muted">
+        Want to host events? Create an account, then switch to an organiser account.
       </p>
     </div>
   );

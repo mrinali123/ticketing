@@ -8,6 +8,7 @@ import EventsPage from './pages/EventsPage.jsx';
 import EventDetailPage from './pages/EventDetailPage.jsx';
 import CheckoutPage from './pages/CheckoutPage.jsx';
 import MyBookingsPage from './pages/MyBookingsPage.jsx';
+import AccountPage from './pages/AccountPage.jsx';
 import OrganiserPage from './pages/OrganiserPage.jsx';
 import EventFormPage from './pages/EventFormPage.jsx';
 import NotFoundPage from './pages/NotFoundPage.jsx';
@@ -27,6 +28,7 @@ export default function App() {
         <Route element={<ProtectedRoute />}>
           <Route path="bookings/:id" element={<CheckoutPage />} />
           <Route path="my-bookings" element={<MyBookingsPage />} />
+          <Route path="account" element={<AccountPage />} />
           <Route path="bookings" element={<Navigate to="/my-bookings" replace />} />
         </Route>
 

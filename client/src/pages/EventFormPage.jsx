@@ -8,6 +8,7 @@ import TextField from '../components/TextField.jsx';
 import { Loading, PageError } from '../components/PageState.jsx';
 import useFetch from '../hooks/useFetch.js';
 import useTitle from '../hooks/useTitle.js';
+import useInFlight from '../hooks/useInFlight.js';
 import {
   emptyForm,
   formFromEvent,
@@ -46,7 +47,8 @@ export default function EventFormPage() {
   if (!data) return <Loading>Loading event...</Loading>;
 
   const { event } = data;
-  if (event.organiser !== user._id) {
+  // event.organiser comes back populated ({ _id, name, ... }), so compare its _id
+  if ((event.organiser?._id ?? event.organiser) !== user._id) {
     return (
       <PageError
         title="Not your event"
@@ -80,7 +82,9 @@ function EventForm({ event }) {
   const [form, setForm] = useState(initial);
   const [errors, setErrors] = useState({});
   const [serverError, setServerError] = useState('');
-  const [saving, setSaving] = useState(false);
+  // One save at a time. Without this, a double submit on "Create event" would create two
+  // identical events (there's no unique rule to stop it), each with its own seats.
+  const [saving, runOnce] = useInFlight();
 
   function handleChange(e) {
     const { name, value } = e.target;
@@ -88,39 +92,43 @@ function EventForm({ event }) {
     setErrors((errs) => ({ ...errs, [name]: undefined }));
   }
 
-  async function handleSubmit(e) {
+  function handleSubmit(e) {
     e.preventDefault();
-    setServerError('');
 
-    const found = validateEventForm(form, { editing, originalStartTime: initial.startTime });
-    setErrors(found);
-    if (Object.keys(found).length > 0) return;
+    runOnce(async () => {
+      setServerError('');
+      const found = validateEventForm(form, { editing, originalStartTime: initial.startTime });
+      setErrors(found);
+      if (Object.keys(found).length > 0) return;
 
-    const body = {
-      title: form.title.trim(),
-      venue: form.venue.trim(),
-      city: form.city.trim(),
-      startTime: fromLocalInput(form.startTime),
-      pricePaise: toPaise(form.price),
-    };
+      const body = {
+        title: form.title.trim(),
+        venue: form.venue.trim(),
+        city: form.city.trim(),
+        startTime: fromLocalInput(form.startTime),
+        pricePaise: toPaise(form.price),
+      };
 
-    setSaving(true);
-    try {
-      if (editing) {
-        await api(`/api/events/${event._id}`, { method: 'PATCH', body });
-        navigate('/organiser', { state: { flash: `Saved changes to "${body.title}".` } });
-      } else {
-        const rows = Number(form.rows);
-        const seatsPerRow = Number(form.seatsPerRow);
-        await api('/api/events', { method: 'POST', body: { ...body, rows, seatsPerRow } });
-        navigate('/organiser', {
-          state: { flash: `Created "${body.title}" with ${rows * seatsPerRow} seats.` },
-        });
+      try {
+        if (editing) {
+          await api(`/api/events/${event._id}`, { method: 'PATCH', body });
+          navigate('/organiser', { state: { flash: `Saved changes to "${body.title}".` } });
+        } else {
+          // The success message uses the seat count the server actually created
+          const created = await api('/api/events', {
+            method: 'POST',
+            body: { ...body, rows: Number(form.rows), seatsPerRow: Number(form.seatsPerRow) },
+          });
+          navigate('/organiser', {
+            state: {
+              flash: `Created "${created.title}" with ${created.rows * created.seatsPerRow} seats.`,
+            },
+          });
+        }
+      } catch (err) {
+        setServerError(err.message); // e.g. a schema rule the form didn't catch, or a 403
       }
-    } catch (err) {
-      setServerError(err.message); // e.g. a schema rule the form didn't catch, or a 403
-      setSaving(false);
-    }
+    });
   }
 
   const seatCount =

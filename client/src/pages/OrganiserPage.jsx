@@ -6,6 +6,7 @@ import { Loading, PageError } from '../components/PageState.jsx';
 import useFetch from '../hooks/useFetch.js';
 import useFlash from '../hooks/useFlash.js';
 import useTitle from '../hooks/useTitle.js';
+import useInFlight from '../hooks/useInFlight.js';
 import { formatDateTime } from '../utils/format.js';
 
 // What to show in the Status column. A scheduled event whose start time has passed is "Past".
@@ -21,7 +22,8 @@ export default function OrganiserPage() {
   const { data: events, error, setData: setEvents, reload } = useFetch('/api/events/mine');
   const [flash, setFlash] = useFlash(); // e.g. "Created ..." after saving the form
   const [confirmingId, setConfirmingId] = useState(null);
-  const [cancellingId, setCancellingId] = useState(null);
+  const [cancellingId, setCancellingId] = useState(null); // which row says 'Cancelling...'
+  const [, runOnce] = useInFlight();
   const [message, setMessage] = useState(null); // { type, text } after a cancel
 
   if (error) {
@@ -29,29 +31,38 @@ export default function OrganiserPage() {
   }
   if (!events) return <Loading>Loading your events...</Loading>;
 
-  async function cancelEvent(event) {
-    setMessage(null);
-    setFlash(null);
-    setCancellingId(event._id);
-    try {
-      const result = await api(`/api/events/${event._id}/cancel`, { method: 'POST' });
-      setEvents((list) =>
-        list.map((e) => (e._id === event._id ? { ...e, status: result.event.status } : e)),
-      );
-      setConfirmingId(null);
-      const n = result.bookingsCancelled;
-      setMessage({
-        type: 'success',
-        text: `Cancelled "${event.title}".${
-          n > 0 ? ` ${n} booking${n === 1 ? ' was' : 's were'} cancelled with it.` : ''
-        }`,
-      });
-    } catch (err) {
-      setMessage({ type: 'error', text: `Couldn't cancel "${event.title}": ${err.message}` });
-    } finally {
-      setCancellingId(null);
-    }
-  }
+  // runOnce: ignore a second "Yes, cancel" while the first is running. Otherwise the second
+  // request fails with "already cancelled" and its error replaces the success message.
+  const cancelEvent = (event) =>
+    runOnce(async () => {
+      setMessage(null);
+      setFlash(null);
+      setCancellingId(event._id);
+      try {
+        const result = await api(`/api/events/${event._id}/cancel`, { method: 'POST' });
+        setEvents((list) =>
+          list.map((e) => (e._id === event._id ? { ...e, status: result.event.status } : e)),
+        );
+        setConfirmingId(null);
+        // The message uses the count the server actually reported
+        const n = result.bookingsCancelled;
+        setMessage({
+          type: 'success',
+          text: `Cancelled "${event.title}".${
+            n > 0 ? ` ${n} booking${n === 1 ? ' was' : 's were'} cancelled with it.` : ''
+          }`,
+        });
+      } catch (err) {
+        setMessage({ type: 'error', text: `Couldn't cancel "${event.title}": ${err.message}` });
+        // 400 = already cancelled (e.g. in another tab): reload so the table shows the truth
+        if (err.status === 400) {
+          setConfirmingId(null);
+          reload();
+        }
+      } finally {
+        setCancellingId(null);
+      }
+    });
 
   const notice = message ?? (flash && { type: 'success', text: flash });
 
@@ -87,9 +98,15 @@ export default function OrganiserPage() {
       )}
 
       {events.length === 0 ? (
-        <p className="mt-6 text-sm text-muted">
-          You haven't created any events yet. <Link to="/organiser/new">Create your first one</Link>
-        </p>
+        <div className="mt-6 rounded-md border border-dashed border-line bg-white px-4 py-8 text-center">
+          <p className="text-sm text-muted">You haven't created any events yet.</p>
+          <Link
+            to="/organiser/new"
+            className="mt-4 inline-block rounded bg-accent px-4 py-2 text-sm font-medium text-white no-underline hover:bg-accent-dark hover:no-underline"
+          >
+            Create your first event
+          </Link>
+        </div>
       ) : (
         <>
           <p className="mt-4 text-xs text-muted sm:hidden">

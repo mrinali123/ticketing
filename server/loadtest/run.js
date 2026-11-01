@@ -298,8 +298,9 @@ function printResults(scenarios) {
 
 async function writeReport(scenarios) {
   const row = (s) =>
-    `| ${s.name} | ${s.stats.total} | ${s.stats.created} | ${s.stats.conflicts} | ${s.stats.other} | ${ms(s.stats.durationMs)} | ${ms(s.stats.p50)} | ${ms(s.stats.p95)} | ${ms(s.stats.max)} | ${passed(s) ? '✅ PASS' : '❌ FAIL'} |`;
-  const checks = (s) => s.checks.map(([label, ok]) => `- ${ok ? '✅' : '❌'} ${label}`).join('\n');
+    `| ${s.name} | ${s.stats.total} | ${s.stats.created} | ${s.stats.conflicts} | ${s.stats.other} | ${ms(s.stats.durationMs)} | ${ms(s.stats.p50)} | ${ms(s.stats.p95)} | ${ms(s.stats.max)} | ${passed(s) ? 'PASS' : 'FAIL'} |`;
+  const checks = (s) =>
+    s.checks.map(([label, ok]) => `- ${ok ? 'PASS' : 'FAIL'}: ${label}`).join('\n');
   const [a, c, b] = scenarios;
 
   const latest = `${MARKER_START}

@@ -44,3 +44,9 @@ export function formatCountdown(ms) {
   const seconds = String(totalSeconds % 60).padStart(2, '0');
   return `${minutes}:${seconds}`;
 }
+
+// Who's hosting an event: their organisation name, or their own name if they haven't set one.
+// The API sends event.organiser as { _id, name, organisationName } on event pages.
+export function hostName(event) {
+  return event.organiser?.organisationName || event.organiser?.name || '';
+}

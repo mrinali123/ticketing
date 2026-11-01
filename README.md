@@ -1,183 +1,171 @@
 # MySeat
 
-An event ticketing system built with the MERN stack: organisers publish events with a seat map, and users hold, confirm and cancel seat bookings without ever double-selling a seat.
+An event ticketing app where people pick seats on a live seat map and book them, built so that two people can never get the same seat.
 
-## Features (done so far)
+**Live demo:** https://myseat-app.vercel.app
 
-- **Auth**: register, login with JWT, `GET /me` for the current user
-- **Roles**: `user` and `organiser`, enforced by middleware
-- **Events**: organisers create events; a seat map (rows A, B, C… × seats per row) is generated automatically
-- **Browsing**: public list of upcoming events with pagination and city filter; event details with seats
-- **Event management**: the owning organiser can update details or cancel an event (which also cancels its active bookings), and list all their events with seat counts (available / held / booked)
-- **Seat holds**: hold 1–6 seats for a few minutes (`HOLD_DURATION_SECONDS`, default 300). Each seat is claimed with one atomic update inside a MongoDB transaction, so a seat can never be sold twice and a hold is all-or-nothing
-- **Idempotent holds**: send an `Idempotency-Key` header and a retried request returns the original booking instead of creating a second one
-- **Confirm & cancel**: confirming turns held seats into booked ones (payment is simulated); cancelling frees the seats again. Both run in transactions
-- **Expired holds**: treated as free immediately; a cleanup job also tidies them up every 60 seconds
-- **My bookings**: list and view your own bookings with event and seat details
-- **Frontend**: React app covering the whole user flow. Browse events (city filter, pagination), pick up to 6 seats on a live seat map (refreshes every 5 seconds), hold them, pay on a checkout page with a countdown (payment is simulated), get a ticket stub, and view or cancel bookings in a table. Organisers get a dashboard with seat counts per event, plus forms to create, edit and cancel events
-- **Tests**: 96 integration tests against an in-memory MongoDB, including a concurrency test where 20 users grab the same seat at once and exactly one wins
-- **Load test**: 500 simultaneous users against the real server + Atlas; no seat ever double-booked. A fast-fail check made "seat already taken" bursts about 3× faster ([results](docs/load-test-results.md))
+> The API runs on Render's free plan, which sleeps when nobody has used it for a while. The first visit can take **about a minute** while it wakes up; the events page says so when it happens. After that it's quick.
+
+### Demo accounts
+
+| Role      | Email               | Password       |
+| --------- | ------------------- | -------------- |
+| User      | `arjun@example.com` | `Password123!` |
+| Organiser | `asha@example.com`  | `Password123!` |
+
+These are public demo accounts, so please don't put anything real in them.
+
+### Try hosting an event yourself
+
+1. **Sign up** with any email (you start as a normal user).
+2. Click your **name in the navbar** to open your account, enter an organisation name, and choose **Switch to organiser account**.
+3. You land on your organiser dashboard. Choose **Create your first event**, set the date, price and seat layout, and save.
+4. Your event appears on the public events list, showing your organisation as the host.
+
+## What it does
+
+- **Users** browse upcoming events (filter by city), pick up to 6 seats on a seat map that refreshes every 5 seconds, hold them for 5 minutes, pay (simulated) and get a ticket. They can see and cancel their bookings.
+- **Organisers** create events with a seat layout (rows A–Z × seats per row), edit details, cancel events, and see how many seats are available, held and booked. Any user can become an organiser from their account page; events show the organisation that hosts them.
+
+## Key engineering decisions
+
+- **Atomic conditional seat holds.** Each seat is claimed with a single `findOneAndUpdate` whose filter says "only if it's still free", so checking and claiming happen in one step and a race between two buyers can't sell a seat twice.
+- **Transactions for multi-seat holds.** Holding several seats runs in a MongoDB transaction, so if any one seat is taken, the whole hold is rolled back: all seats or none.
+- **Lazy hold expiry plus a cleanup job.** An expired hold counts as free the moment its time is up, with no timers needed. A job every 60 seconds only tidies the database, so correctness never depends on it.
+- **Idempotency keys.** The app sends an `Idempotency-Key` with each hold, so a request retried after a network drop returns the original booking instead of creating a second one; a unique index covers two copies arriving at the same instant.
+- **Rate limiting.** Login and sign-up are limited per IP (20 per 15 minutes) to slow down password guessing; seat holds are limited per user, so people sharing one Wi-Fi don't block each other.
+- **JWT auth and role guards.** Passwords are stored as bcrypt hashes; a signed token identifies the user, and middleware checks both the role (organiser) and ownership (your event, your booking) on every request. Because the role is stored inside the token, switching to an organiser account issues a fresh token.
+
+## Testing
+
+**108 automated tests** (Vitest + Supertest) run against a throwaway in-memory MongoDB, never the real database. They cover auth, events, bookings and security (rate limits, error responses, headers). Highlights:
+
+- **Concurrency:** 20 users try to hold the same seat at the same moment. Every run, exactly 1 succeeds, 19 get `409`, and the seat belongs to the winner.
+- **All-or-nothing:** if one seat in a group is taken, none are held, including when the quick pre-check read was out of date.
+- **Idempotency:** the same key sent twice, even simultaneously, creates only one booking.
+- **Expiry:** real 1-second holds expire, the seat can be taken by someone else, and the late confirm gets `409`.
+
+CI (GitHub Actions) runs server lint and tests, and client lint and build, on every push and pull request.
+
+### Load test
+
+`npm run loadtest` fires **500 simultaneous requests** at the real server and Atlas database. In every run, no seat was ever given to two people and no request errored. Adding a fast-fail check (reject a clearly taken seat before opening a transaction) made the common "seat already gone" case about 3× faster:
+
+| Scenario                           | Run    | 201 / 409 | p50       | p95       |
+| ---------------------------------- | ------ | --------- | --------- | --------- |
+| A: 500 users, 1 free seat          | Before | 1 / 499   | 33.9 s    | 35.8 s    |
+|                                    | After  | 1 / 499   | 33.9 s    | 35.8 s    |
+| B: 500 users, 100 seats            | Before | 100 / 400 | 25.8 s    | 26.9 s    |
+|                                    | After  | 99 / 401  | 25.9 s    | 27.9 s    |
+| C: 500 users, 1 already-taken seat | Before | 0 / 500   | 16.9 s    | 19.0 s    |
+|                                    | After  | 0 / 500   | **5.9 s** | **7.9 s** |
+
+The absolute times are slow because the free Atlas tier handles only about 140 operations per second. Measuring each layer showed that, not the app code, was the bottleneck. Full results, method and what I learned: [docs/load-test-results.md](docs/load-test-results.md).
+
+## Architecture
+
+```mermaid
+flowchart LR
+    subgraph Vercel
+        A["React app<br/>(Vite build, static files)"]
+    end
+    subgraph Render
+        B["Express API<br/>Node 22"]
+        J["Cleanup job<br/>every 60 s"]
+    end
+    subgraph Atlas["MongoDB Atlas"]
+        C[("MongoDB<br/>replica set")]
+    end
+
+    A -- "HTTPS + JSON<br/>Authorization: Bearer JWT" --> B
+    B -- "Mongoose<br/>(transactions)" --> C
+    J -.->|expire old holds| C
+```
+
+The browser loads the React app from Vercel, then calls the API on Render directly (CORS allows only the frontend's address). Inside the API, each request goes **route → controller → service → model**: routes apply auth and rate limits, controllers check input and pick the HTTP status, services hold the business logic, and models talk to MongoDB.
 
 ## Tech stack
 
-| Layer    | Tools                                         |
-| -------- | --------------------------------------------- |
-| Backend  | Node.js 20+, Express 5, ES modules            |
-| Database | MongoDB (Atlas) with Mongoose                 |
-| Auth     | bcrypt (password hashing), jsonwebtoken (JWT) |
-| Testing  | Vitest, Supertest, mongodb-memory-server      |
-| Tooling  | ESLint (flat config), Prettier, nodemon       |
-| Frontend | React 19, Vite, Tailwind CSS 4, React Router  |
-
-## Folder structure
-
-```
-ticketing/
-├── client/                 # React frontend (Vite)
-│   └── src/
-│       ├── api/            # fetch wrapper (client.js) + session storage
-│       ├── auth/           # AuthContext: login, register, logout, current user
-│       ├── components/     # Layout, Navbar, Footer, route guards, form pieces
-│       ├── hooks/          # useFetch, useNow, useTitle, useFlash
-│       ├── pages/          # One file per page
-│       └── utils/          # Form validation, price/date formatting, booking status helpers
-├── docs/                   # Notes, e.g. interview-notes.md
-├── requests/               # VS Code REST Client files (auth, events, bookings)
-└── server/
-    ├── scripts/            # seed.js, test-expired-token.js
-    ├── tests/              # Vitest setup, helpers and test files
-    └── src/
-        ├── app.js          # Express app: middleware + routes (no DB connection)
-        ├── index.js        # Entry point: loads .env, connects to DB, starts server
-        ├── config/         # db.js (MongoDB connection)
-        ├── routes/         # URL → middleware → controller
-        ├── controllers/    # Read the request, validate input, send the response
-        ├── services/       # Business logic and database work
-        ├── models/         # Mongoose schemas: User, Event, Seat, Booking
-        ├── middleware/     # requireAuth, requireRole
-        ├── jobs/           # expireHolds.js (cleanup of expired seat holds)
-        ├── errors/         # httpError helper (Error with an HTTP status)
-        └── validators/     # (planned)
-```
+| Layer    | Tools                                                            |
+| -------- | ---------------------------------------------------------------- |
+| Frontend | React 19, Vite, Tailwind CSS 4, React Router 7                   |
+| Backend  | Node.js 22, Express 5 (ES modules), Mongoose                     |
+| Database | MongoDB Atlas (replica set, needed for transactions)             |
+| Auth     | bcrypt, jsonwebtoken                                             |
+| Security | helmet, express-rate-limit, cors                                 |
+| Testing  | Vitest, Supertest, mongodb-memory-server, a plain-Node load test |
+| Tooling  | ESLint, Prettier, nodemon, GitHub Actions                        |
+| Hosting  | Vercel (frontend), Render (API), MongoDB Atlas M0 (database)     |
 
 ## Running locally
 
-**Requirements:** Node.js 20+, npm, and a MongoDB connection string (e.g. a free MongoDB Atlas cluster).
+**You need:** Node.js 22.12+, npm, and a MongoDB connection string (a free Atlas cluster works).
 
-1. **Install dependencies**
+```bash
+# 1. API
+cd server
+npm install
+cp .env.example .env     # then fill in MONGO_URI and JWT_SECRET (see comments in the file)
+npm run seed             # sample data; WARNING: deletes existing users, events, seats and bookings
+npm run dev              # http://localhost:5000  (check /api/health)
 
-   ```bash
-   cd server
-   npm install
-   ```
+# 2. Frontend, in a second terminal
+cd client
+npm install
+npm run dev              # http://localhost:5173
+```
 
-2. **Set environment variables**: copy `server/.env.example` to `server/.env` and fill it in:
+The frontend uses `VITE_API_URL` (default `http://localhost:5000`; see `client/.env.example`).
 
-   | Variable                | Example                               | Purpose                                            |
-   | ----------------------- | ------------------------------------- | -------------------------------------------------- |
-   | `MONGO_URI`             | `mongodb://localhost:27017/ticketing` | MongoDB connection string                          |
-   | `JWT_SECRET`            | a long random string                  | Signs and verifies JWTs                            |
-   | `JWT_EXPIRES_IN`        | `1d`                                  | How long a login token lasts                       |
-   | `PORT`                  | `5000`                                | Port the API listens on                            |
-   | `NODE_ENV`              | `development`                         | Environment name                                   |
-   | `HOLD_DURATION_SECONDS` | `300`                                 | How long a seat hold lasts (optional, default 300) |
-   | `CLIENT_URL`            | `http://localhost:5173`               | Frontend origin allowed by CORS (optional)         |
+**Useful scripts**
 
-3. **Seed sample data** (warning: deletes existing users, events, seats and bookings first)
+| Where    | Command            | What it does                                              |
+| -------- | ------------------ | --------------------------------------------------------- |
+| `server` | `npm test`         | All automated tests (in-memory database)                  |
+| `server` | `npm run lint`     | ESLint                                                    |
+| `server` | `npm run loadtest` | 500-user load test against the running server (cleans up) |
+| `client` | `npm run lint`     | ESLint, including React Hooks rules                       |
+| `client` | `npm run build`    | Production build into `client/dist/`                      |
 
-   ```bash
-   npm run seed
-   ```
+To try the API by hand, open the files in `requests/` with the VS Code REST Client extension. Deploying your own copy: [docs/DEPLOY.md](docs/DEPLOY.md).
 
-   Creates 3 organisers (`asha@`, `ravi@`, `meera@example.com`), 5 users, 10 events and 1000 seats. Every account's password is `Password123!`.
+## API endpoints
 
-4. **Start the dev server** (restarts on file changes)
+Send the token as `Authorization: Bearer <token>`. Prices are in paise (₹1 = 100 paise).
 
-   ```bash
-   npm run dev
-   ```
+| Method | Path                         | Auth             | Description                                                                                                                      |
+| ------ | ---------------------------- | ---------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| GET    | `/api/health`                | No               | Server and database status                                                                                                       |
+| POST   | `/api/auth/register`         | No               | Create an account (role is always `user`). Rate limited                                                                          |
+| POST   | `/api/auth/login`            | No               | Log in; returns a JWT and the user. Rate limited                                                                                 |
+| GET    | `/api/auth/me`               | Yes              | The logged-in user                                                                                                               |
+| POST   | `/api/auth/become-organiser` | Yes              | Switch your account to organiser: `{ organisationName }` (2–80 chars). Returns a new token and user. 400 if already an organiser |
+| GET    | `/api/events`                | No               | Upcoming events. Query: `page`, `limit` (max 50), `city`                                                                         |
+| GET    | `/api/events/cities`         | No               | Cities with upcoming events, A to Z                                                                                              |
+| GET    | `/api/events/mine`           | Organiser        | Your events (any status) with seat counts by status                                                                              |
+| GET    | `/api/events/:id`            | No               | One event with its seat map                                                                                                      |
+| POST   | `/api/events`                | Organiser        | Create an event and its seats (max 26 rows × 50 seats)                                                                           |
+| PATCH  | `/api/events/:id`            | Owning organiser | Update title, venue, city, start time or price                                                                                   |
+| POST   | `/api/events/:id/cancel`     | Owning organiser | Cancel the event and its pending/confirmed bookings                                                                              |
+| POST   | `/api/bookings/hold`         | Yes              | Hold 1–6 seats: `{ eventId, seatLabels }`, optional `Idempotency-Key`. 201 new, 200 replay, 409 taken. Rate limited              |
+| POST   | `/api/bookings/:id/confirm`  | Booking owner    | Confirm a hold (simulated payment). 409 if the hold expired or was lost                                                          |
+| POST   | `/api/bookings/:id/cancel`   | Booking owner    | Cancel before the event starts; frees the seats                                                                                  |
+| GET    | `/api/bookings/me`           | Yes              | Your bookings, newest first                                                                                                      |
+| GET    | `/api/bookings/:id`          | Booking owner    | One booking with event and seat details                                                                                          |
 
-   The API runs at `http://localhost:5000`. Check `GET /api/health`.
+Booking statuses: `pending` (held) → `confirmed`, or `expired` (hold ran out) / `cancelled`.
 
-5. **Run the tests** (use an in-memory database, never your real one)
+## Known limitations and next steps
 
-   ```bash
-   npm test            # run once
-   npm run test:watch  # re-run on changes
-   ```
-
-6. **Start the frontend** (in a second terminal, while the API is running)
-
-   ```bash
-   cd client
-   npm install
-   cp .env.example .env   # optional: only needed if the API isn't on http://localhost:5000
-   npm run dev
-   ```
-
-   Open `http://localhost:5173`. Log in with a seeded account, e.g. `arjun@example.com` (user) or `asha@example.com` (organiser), password `Password123!`.
-
-Other server scripts: `npm run lint`, `npm run format`, `npm run test:expiry` (manual JWT expiry check against the running server), `npm run loadtest` (500-user load test against the running server and real database; cleans up after itself and updates `docs/load-test-results.md`).
-
-To try the API by hand, open `requests/auth.http`, `requests/events.http` or `requests/bookings.http` with the VS Code **REST Client** extension and send the requests top to bottom. `bookings.http` walks through the whole flow: hold, idempotent retry, a competing user getting 409, confirm, list and cancel.
-
-## Frontend
-
-The React app lives in `client/` (Vite, React 19, React Router 7, Tailwind CSS 4).
-
-**Setup**
-
-1. Start the API first (see "Running locally" above). The frontend talks to it from the browser, so the API must allow the frontend's address via CORS: `CLIENT_URL` in `server/.env` (default `http://localhost:5173`).
-2. Install and run:
-
-   ```bash
-   cd client
-   npm install
-   npm run dev
-   ```
-
-3. Open `http://localhost:5173`.
-
-**Environment variables** (`client/.env`, copy from `client/.env.example`; optional)
-
-| Variable       | Default                 | Purpose                  |
-| -------------- | ----------------------- | ------------------------ |
-| `VITE_API_URL` | `http://localhost:5000` | Where the API is running |
-
-**Scripts**
-
-| Command           | What it does                            |
-| ----------------- | --------------------------------------- |
-| `npm run dev`     | Dev server with hot reload on port 5173 |
-| `npm run build`   | Production build into `client/dist/`    |
-| `npm run preview` | Serve the production build locally      |
-| `npm run lint`    | ESLint, including the React Hooks rules |
-| `npm run format`  | Prettier                                |
-
-**Pages**
-
-| Path                         | Who           | What                                                  |
-| ---------------------------- | ------------- | ----------------------------------------------------- |
-| `/`                          | Everyone      | Upcoming events, city filter, pagination              |
-| `/events/:id`                | Everyone      | Event details and the seat map (log in to hold seats) |
-| `/login`, `/register`        | Everyone      | Log in / create an account                            |
-| `/bookings/:id`              | Booking owner | Checkout with a hold countdown, then the ticket stub  |
-| `/my-bookings`               | Logged in     | Your bookings, with cancel                            |
-| `/organiser`                 | Organisers    | Your events with seat counts, edit and cancel         |
-| `/organiser/new`             | Organisers    | Create an event                                       |
-| `/organiser/events/:id/edit` | Organisers    | Edit an event (seat layout is read-only)              |
-
-**Notes**
-
-- The login token is kept in `localStorage` for simplicity. An httpOnly cookie would be safer in production (see the comment in `client/src/auth/AuthContext.jsx`).
-- Hold requests send an `Idempotency-Key` made with `crypto.randomUUID()`, which browsers only allow on `localhost` or HTTPS.
-- Layouts were checked in Chrome at 320px, 390px and 1280px wide: no page scrolls sideways. Wide tables scroll inside their own box, and My bookings switches to a stacked list on phones.
+- **Free-tier latency.** The API sleeps after inactivity (about a minute to wake), and the free database caps throughput at roughly 140 operations per second. A paid tier, or fewer database calls per hold, would fix both.
+- **Polling instead of websockets.** The seat map asks the server for changes every 5 seconds, so other people's holds can take up to 5 seconds to appear. The server still prevents double-booking regardless; websockets or server-sent events would make the map update instantly.
+- **Simulated payment.** "Pay and confirm" doesn't charge anything. A real version would use a payment provider and confirm the booking from its webhook.
+- **Tokens in localStorage.** Simple, but readable by any script on the page if an XSS bug ever slipped in. An httpOnly cookie (with CSRF protection) is the safer production choice.
+- **Smaller gaps.** Creating an event and its seats isn't one transaction yet (the same pattern as holds would fix it); rate-limit counters live in memory, so they reset on restart and wouldn't be shared across several servers (a Redis store would fix that); cancelling an event doesn't release its seats.
 
 ## Screenshots
 
-Placeholders: save screenshots in `docs/screenshots/` with these names and they will show up here.
-
-| Events list                                 | Seat map                                   |
+| Events                                      | Seat map                                   |
 | ------------------------------------------- | ------------------------------------------ |
 | ![Events list](docs/screenshots/events.png) | ![Seat map](docs/screenshots/seat-map.png) |
 
@@ -185,54 +173,12 @@ Placeholders: save screenshots in `docs/screenshots/` with these names and they 
 | ------------------------------------------ | -------------------------------------- |
 | ![Checkout](docs/screenshots/checkout.png) | ![Ticket](docs/screenshots/ticket.png) |
 
-| My bookings                                      | Organiser dashboard                                    |
-| ------------------------------------------------ | ------------------------------------------------------ |
-| ![My bookings](docs/screenshots/my-bookings.png) | ![Organiser dashboard](docs/screenshots/organiser.png) |
+| Organiser dashboard                                    |
+| ------------------------------------------------------ |
+| ![Organiser dashboard](docs/screenshots/organiser.png) |
 
-| Event form                                     | Mobile (390px)                                  |
-| ---------------------------------------------- | ----------------------------------------------- |
-| ![Event form](docs/screenshots/event-form.png) | ![Mobile seat map](docs/screenshots/mobile.png) |
+## More docs
 
-## API endpoints
-
-| Method | Path                        | Auth required          | Description                                                                                                               |
-| ------ | --------------------------- | ---------------------- | ------------------------------------------------------------------------------------------------------------------------- |
-| GET    | `/api/health`               | No                     | Server status and database connection state                                                                               |
-| POST   | `/api/auth/register`        | No                     | Create a user account (role is always `user`)                                                                             |
-| POST   | `/api/auth/login`           | No                     | Log in; returns a JWT and the user                                                                                        |
-| GET    | `/api/auth/me`              | Yes                    | Get the logged-in user                                                                                                    |
-| GET    | `/api/events`               | No                     | List upcoming scheduled events. Query: `page`, `limit` (max 50), `city`                                                   |
-| GET    | `/api/events/cities`        | No                     | Cities that have upcoming events, A to Z (for the city filter)                                                            |
-| GET    | `/api/events/mine`          | Yes (organiser)        | Your own events (any status), newest first, with seat counts by status                                                    |
-| GET    | `/api/events/:id`           | No                     | Get one event with its seats                                                                                              |
-| POST   | `/api/events`               | Yes (organiser)        | Create an event and generate its seats                                                                                    |
-| PATCH  | `/api/events/:id`           | Yes (owning organiser) | Update title, venue, city, startTime or pricePaise                                                                        |
-| POST   | `/api/events/:id/cancel`    | Yes (owning organiser) | Cancel the event and its pending/confirmed bookings                                                                       |
-| POST   | `/api/bookings/hold`        | Yes                    | Hold seats. Body: `{ eventId, seatLabels }` (1–6). Optional `Idempotency-Key` header. 201 new, 200 replay, 409 seat taken |
-| POST   | `/api/bookings/:id/confirm` | Yes (booking owner)    | Confirm a pending hold (simulated payment). 409 if the hold expired or was lost                                           |
-| POST   | `/api/bookings/:id/cancel`  | Yes (booking owner)    | Cancel a pending/confirmed booking before the event starts; frees its seats                                               |
-| GET    | `/api/bookings/me`          | Yes                    | Your bookings, newest first, with event and seat details                                                                  |
-| GET    | `/api/bookings/:id`         | Yes (booking owner)    | One booking with event and seat details                                                                                   |
-
-Send the token as `Authorization: Bearer <token>`. Prices are stored in paise (₹1 = 100 paise).
-
-**Booking lifecycle:** `pending` (seats held) → `confirmed` (seats booked), or → `expired` (hold ran out) / `cancelled` (by the user, or when the organiser cancels the event).
-
-## Deployment
-
-The app is set up for free hosting: **Render** (API), **Vercel** (frontend) and **MongoDB Atlas** (database). Follow the step-by-step guide in [docs/DEPLOY.md](docs/DEPLOY.md).
-
-Production hardening already in place:
-
-- **Security headers** with helmet, and CORS limited to the origins in `CLIENT_URL` (comma-separated list)
-- **Rate limiting** (429 with a clear message): login and sign-up 20 per 15 minutes per IP; seat holds 30 per 5 minutes per user. Off when `NODE_ENV=test`
-- **No stack traces or internal error messages** in responses when `NODE_ENV=production`; unknown routes and broken JSON bodies get JSON errors
-- **`trust proxy`** set for Render, so rate limits see the real visitor IP
-- **CI** (`.github/workflows/ci.yml`): every push and pull request runs server lint and tests, and client lint and build, on Node 22
-
-## Roadmap
-
-- ~~**Seat hold & booking with concurrency safety**~~ (done)
-- ~~**React frontend**~~ (done)
-- ~~**Deployment setup**~~ (done, see [docs/DEPLOY.md](docs/DEPLOY.md))
-- **Payment simulation**: confirm currently counts as "paid"; next is a fake payment step that can succeed or fail
+- [docs/DEPLOY.md](docs/DEPLOY.md): step-by-step deployment to Render, Vercel and Atlas
+- [docs/load-test-results.md](docs/load-test-results.md): load test method, numbers and findings
+- [docs/interview-notes.md](docs/interview-notes.md): how everything works, in plain English

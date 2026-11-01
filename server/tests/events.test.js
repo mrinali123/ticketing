@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import Event from '../src/models/Event.js';
 import Seat from '../src/models/Seat.js';
 import Booking from '../src/models/Booking.js';
+import User from '../src/models/User.js';
 import {
   api,
   createUserWithToken,
@@ -176,6 +177,33 @@ describe('GET /api/events', () => {
     const bad = await api().get('/api/events?page=-3&limit=abc');
     expect(bad.status).toBe(200);
     expect(bad.body).toMatchObject({ page: 1, limit: 10 });
+  });
+});
+
+describe('organiser shown on events (name and organisation, never the email)', () => {
+  beforeEach(async () => {
+    await User.updateOne({ _id: organiser.user._id }, { organisationName: 'Asha Live' });
+  });
+
+  it('is included in the events list', async () => {
+    await insertEvent(organiser.user);
+
+    const res = await api().get('/api/events');
+
+    expect(res.body.data[0].organiser).toEqual({
+      _id: organiser.user._id.toString(),
+      name: organiser.user.name,
+      organisationName: 'Asha Live',
+    });
+  });
+
+  it('is included on a single event', async () => {
+    const event = await insertEvent(organiser.user);
+
+    const res = await api().get(`/api/events/${event._id}`);
+
+    expect(res.body.event.organiser).toMatchObject({ organisationName: 'Asha Live' });
+    expect(res.body.event.organiser).not.toHaveProperty('email');
   });
 });
 

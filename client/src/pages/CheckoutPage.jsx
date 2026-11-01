@@ -8,6 +8,7 @@ import { Loading, PageError } from '../components/PageState.jsx';
 import useFetch from '../hooks/useFetch.js';
 import useNow from '../hooks/useNow.js';
 import useTitle from '../hooks/useTitle.js';
+import useInFlight from '../hooks/useInFlight.js';
 import { formatCountdown, formatDateTime, formatPrice } from '../utils/format.js';
 import { displayStatus, seatList } from '../utils/booking.js';
 
@@ -20,7 +21,7 @@ export default function CheckoutPage() {
     setData: setBooking,
     reload: load,
   } = useFetch(`/api/bookings/${id}`);
-  const [paying, setPaying] = useState(false);
+  const [paying, runOnce] = useInFlight(); // one confirm request at a time
   const [payError, setPayError] = useState(null); // { text, lost?: true }
   const [serverSaysExpired, setServerSaysExpired] = useState(false);
 
@@ -51,31 +52,30 @@ export default function CheckoutPage() {
   const status = shownStatus;
   const eventLink = booking.event ? `/events/${booking.event._id}` : '/';
 
-  async function payAndConfirm() {
-    setPayError(null);
-    setPaying(true);
-    try {
-      const confirmed = await api(`/api/bookings/${booking._id}/confirm`, { method: 'POST' });
-      // The confirm response isn't populated, so keep our event/seat details and take the new status
-      setBooking((b) => ({ ...b, status: confirmed.status }));
-    } catch (err) {
-      if (err.status === 409 && err.message === 'Hold expired') {
-        setServerSaysExpired(true);
-      } else if (err.status === 409) {
-        // "Hold lost": a seat slipped away (e.g. the hold ran out and someone else took it)
-        setPayError({
-          text: 'Some of your seats were released before payment went through, so nothing was charged.',
-          lost: true,
-        });
-      } else if (err.status === 400) {
-        load(); // no longer pending (e.g. confirmed in another tab): show its real state
-      } else {
-        setPayError({ text: err.message });
+  // runOnce ignores repeat clicks while the confirm request is still running
+  const payAndConfirm = () =>
+    runOnce(async () => {
+      setPayError(null);
+      try {
+        const confirmed = await api(`/api/bookings/${booking._id}/confirm`, { method: 'POST' });
+        // The confirm response isn't populated, so keep our event/seat details and take the new status
+        setBooking((b) => ({ ...b, status: confirmed.status }));
+      } catch (err) {
+        if (err.status === 409 && err.message === 'Hold expired') {
+          setServerSaysExpired(true);
+        } else if (err.status === 409) {
+          // "Hold lost": a seat slipped away (e.g. the hold ran out and someone else took it)
+          setPayError({
+            text: 'Some of your seats were released before payment went through, so nothing was charged.',
+            lost: true,
+          });
+        } else if (err.status === 400) {
+          load(); // no longer pending (e.g. confirmed in another tab): show its real state
+        } else {
+          setPayError({ text: err.message });
+        }
       }
-    } finally {
-      setPaying(false);
-    }
-  }
+    });
 
   // ---- Confirmed: show the ticket ----
   if (status === 'confirmed') {

@@ -6,6 +6,7 @@ import TextField from '../components/TextField.jsx';
 import Notice from '../components/Notice.jsx';
 import { validateLogin } from '../utils/validate.js';
 import useTitle from '../hooks/useTitle.js';
+import useInFlight from '../hooks/useInFlight.js';
 
 export default function LoginPage() {
   useTitle('Log in');
@@ -17,7 +18,7 @@ export default function LoginPage() {
   const [form, setForm] = useState({ email: '', password: '' });
   const [errors, setErrors] = useState({});
   const [serverError, setServerError] = useState('');
-  const [submitting, setSubmitting] = useState(false);
+  const [submitting, runOnce] = useInFlight(); // one login request at a time
 
   // Where to go after logging in: the page that sent us here, or the events list
   const redirectTo = location.state?.from?.pathname || '/';
@@ -30,22 +31,23 @@ export default function LoginPage() {
     setErrors((errs) => ({ ...errs, [name]: undefined })); // clear that field's error as they type
   }
 
-  async function handleSubmit(e) {
+  function handleSubmit(e) {
     e.preventDefault();
-    setServerError('');
 
-    const found = validateLogin(form);
-    setErrors(found);
-    if (Object.keys(found).length > 0) return;
+    // runOnce ignores repeat submits while a login request is still running
+    runOnce(async () => {
+      setServerError('');
+      const found = validateLogin(form);
+      setErrors(found);
+      if (Object.keys(found).length > 0) return;
 
-    setSubmitting(true);
-    try {
-      await login(form.email.trim(), form.password);
-      navigate(redirectTo, { replace: true });
-    } catch (err) {
-      setServerError(err.message); // e.g. "Invalid email or password"
-      setSubmitting(false);
-    }
+      try {
+        await login(form.email.trim(), form.password);
+        navigate(redirectTo, { replace: true });
+      } catch (err) {
+        setServerError(err.message); // e.g. "Invalid email or password"
+      }
+    });
   }
 
   return (

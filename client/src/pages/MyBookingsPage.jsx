@@ -6,6 +6,7 @@ import { Loading, PageError } from '../components/PageState.jsx';
 import useFetch from '../hooks/useFetch.js';
 import useNow from '../hooks/useNow.js';
 import useTitle from '../hooks/useTitle.js';
+import useInFlight from '../hooks/useInFlight.js';
 import { formatDate, formatPrice } from '../utils/format.js';
 import { displayStatus, seatList, statusClasses, statusLabels } from '../utils/booking.js';
 
@@ -19,7 +20,8 @@ export default function MyBookingsPage() {
     reload,
   } = useFetch('/api/bookings/me');
   const [confirmingId, setConfirmingId] = useState(null); // row showing "Cancel booking? Yes / No"
-  const [cancellingId, setCancellingId] = useState(null);
+  const [cancellingId, setCancellingId] = useState(null); // which row says 'Cancelling...'
+  const [, runOnce] = useInFlight();
   const [message, setMessage] = useState(null); // { type: 'success' | 'error', text }
 
   // Re-check every 15s so a hold that runs out while the page is open flips to "Expired"
@@ -32,29 +34,37 @@ export default function MyBookingsPage() {
   }
   if (!bookings) return <Loading>Loading your bookings...</Loading>;
 
-  async function cancelBooking(booking) {
-    setMessage(null);
-    setCancellingId(booking._id);
-    try {
-      const updated = await api(`/api/bookings/${booking._id}/cancel`, { method: 'POST' });
-      // Keep the populated event/seats from the list, take the new status
-      setBookings((list) =>
-        list.map((b) => (b._id === booking._id ? { ...b, status: updated.status } : b)),
-      );
-      setConfirmingId(null);
-      setMessage({
-        type: 'success',
-        text: `Booking cancelled. Seats ${seatList(booking)} are free again.`,
-      });
-    } catch (err) {
-      setMessage({
-        type: 'error',
-        text: `Couldn't cancel the booking for ${booking.event?.title ?? 'this event'}: ${err.message}`,
-      });
-    } finally {
-      setCancellingId(null);
-    }
-  }
+  // runOnce: a second "Yes, cancel" while the first is still running is ignored. Otherwise the
+  // second request would fail ("already cancelled") and its error would replace the success.
+  const cancelBooking = (booking) =>
+    runOnce(async () => {
+      setMessage(null);
+      setCancellingId(booking._id);
+      try {
+        const updated = await api(`/api/bookings/${booking._id}/cancel`, { method: 'POST' });
+        // Keep the populated event/seats from the list, take the new status from the server
+        setBookings((list) =>
+          list.map((b) => (b._id === booking._id ? { ...b, status: updated.status } : b)),
+        );
+        setConfirmingId(null);
+        setMessage({
+          type: 'success',
+          text: `Booking cancelled. Seats ${seatList(booking)} are free again.`,
+        });
+      } catch (err) {
+        setMessage({
+          type: 'error',
+          text: `Couldn't cancel the booking for ${booking.event?.title ?? 'this event'}: ${err.message}`,
+        });
+        // 400 = it's no longer cancellable (e.g. cancelled in another tab): show the real state
+        if (err.status === 400) {
+          setConfirmingId(null);
+          reload();
+        }
+      } finally {
+        setCancellingId(null);
+      }
+    });
 
   // Work out each booking's status and actions once, for both the phone list and the table
   const rows = bookings.map((booking) => {

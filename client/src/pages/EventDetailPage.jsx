@@ -4,11 +4,12 @@ import { api } from '../api/client.js';
 import { useAuth } from '../auth/useAuth.js';
 import useFetch from '../hooks/useFetch.js';
 import useTitle from '../hooks/useTitle.js';
+import useInFlight from '../hooks/useInFlight.js';
 import SeatMap from '../components/SeatMap.jsx';
 import Button from '../components/Button.jsx';
 import Notice from '../components/Notice.jsx';
 import { Loading, PageError } from '../components/PageState.jsx';
-import { formatDateTime, formatPrice } from '../utils/format.js';
+import { formatDateTime, formatPrice, hostName } from '../utils/format.js';
 
 const MAX_SEATS = 6; // same limit as the backend
 const REFRESH_MS = 5000;
@@ -31,7 +32,7 @@ export default function EventDetailPage() {
 
   const [refreshFailed, setRefreshFailed] = useState(false);
   const [message, setMessage] = useState(null); // { type: 'error' | 'info', text }
-  const [holding, setHolding] = useState(false);
+  const [holding, runOnce] = useInFlight(); // one hold request at a time
 
   // The Idempotency-Key for the current hold attempt. Kept in a ref so a retry after a network
   // error sends the SAME key (the server then returns the booking it may already have made),
@@ -123,46 +124,47 @@ export default function EventDetailPage() {
     setSelected(next);
   }
 
-  async function holdSeats() {
-    setMessage(null);
-    setHolding(true);
-    idempotencyKey.current ??= crypto.randomUUID();
+  // runOnce ignores repeat clicks while a hold request is running. (Even without it, a repeat
+  // would reuse the same Idempotency-Key and get the same booking back, never a second one.)
+  const holdSeats = () =>
+    runOnce(async () => {
+      setMessage(null);
+      idempotencyKey.current ??= crypto.randomUUID();
 
-    try {
-      const booking = await api('/api/bookings/hold', {
-        method: 'POST',
-        body: { eventId: event._id, seatLabels: selectedLabels },
-        headers: { 'Idempotency-Key': idempotencyKey.current },
-      });
-      idempotencyKey.current = null;
-      navigate(`/bookings/${booking._id}`);
-    } catch (err) {
-      setHolding(false);
-      if (err.status === 0) {
-        // No answer at all: keep the same key so pressing the button again can't double-book
-        setMessage({
-          type: 'error',
-          text: "Couldn't reach the server. Your seats may or may not be held. Press the button again to retry safely.",
+      try {
+        const booking = await api('/api/bookings/hold', {
+          method: 'POST',
+          body: { eventId: event._id, seatLabels: selectedLabels },
+          headers: { 'Idempotency-Key': idempotencyKey.current },
         });
-        return;
-      }
+        idempotencyKey.current = null;
+        navigate(`/bookings/${booking._id}`);
+      } catch (err) {
+        if (err.status === 0) {
+          // No answer at all: keep the same key so pressing the button again can't double-book
+          setMessage({
+            type: 'error',
+            text: "Couldn't reach the server. Your seats may or may not be held. Press the button again to retry safely.",
+          });
+          return;
+        }
 
-      idempotencyKey.current = null;
-      if (err.status === 409) {
-        const seat = err.message.match(/Seat (\S+)/)?.[1];
-        setMessage({
-          type: 'error',
-          text: seat
-            ? `Couldn't hold ${seat}, someone just took it. Pick another.`
-            : "Couldn't hold those seats, someone just took one. Pick again.",
-        });
-        if (seat) setSelected(new Set([...selected].filter((label) => label !== seat)));
-        refreshSeats();
-      } else {
-        setMessage({ type: 'error', text: err.message });
+        idempotencyKey.current = null;
+        if (err.status === 409) {
+          const seat = err.message.match(/Seat (\S+)/)?.[1];
+          setMessage({
+            type: 'error',
+            text: seat
+              ? `Couldn't hold ${seat}, someone just took it. Pick another.`
+              : "Couldn't hold those seats, someone just took one. Pick again.",
+          });
+          if (seat) setSelected(new Set([...selected].filter((label) => label !== seat)));
+          refreshSeats();
+        } else {
+          setMessage({ type: 'error', text: err.message });
+        }
       }
-    }
-  }
+    });
 
   return (
     <div>
@@ -177,6 +179,9 @@ export default function EventDetailPage() {
           <p className="text-sm text-muted">
             {event.venue}, {event.city}
           </p>
+          {hostName(event) && (
+            <p className="mt-1 text-xs text-muted">Hosted by {hostName(event)}</p>
+          )}
         </div>
         <p className="text-sm">
           <span className="font-medium">{formatPrice(event.pricePaise)}</span>

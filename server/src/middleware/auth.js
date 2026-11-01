@@ -12,7 +12,7 @@ export function requireAuth(req, res, next) {
     req.user = { id: payload.sub, role: payload.role };
     next();
   } catch (err) {
-    // 👉 TASK 1: Handle expired tokens specifically
+    // Expired tokens get their own message, so the client can tell the user to log in again
     if (err.name === 'TokenExpiredError') {
       return res.status(401).json({ message: 'Token expired, please log in again' });
     }

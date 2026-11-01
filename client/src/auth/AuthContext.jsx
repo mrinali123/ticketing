@@ -49,11 +49,18 @@ export function AuthProvider({ children }) {
     return loggedIn;
   }, []);
 
-  // Register doesn't return a token, so log straight in afterwards
+  // Register doesn't return a token, so log straight in afterwards. These are two requests: if
+  // the account was created but the login fails, say so (accountCreated), so the page doesn't
+  // report a failed sign-up for an account that now exists.
   const register = useCallback(
     async (name, email, password) => {
       await api('/api/auth/register', { method: 'POST', body: { name, email, password } });
-      return login(email, password);
+      try {
+        return await login(email, password);
+      } catch (err) {
+        err.accountCreated = true;
+        throw err;
+      }
     },
     [login],
   );
@@ -63,9 +70,21 @@ export function AuthProvider({ children }) {
     setUser(null);
   }, []);
 
+  // Upgrades the account. The server sends back a NEW token, because the role is stored inside
+  // the token: keeping the old one would leave every organiser request answering 403.
+  const becomeOrganiser = useCallback(async (organisationName) => {
+    const { token, user: upgraded } = await api('/api/auth/become-organiser', {
+      method: 'POST',
+      body: { organisationName },
+    });
+    saveSession(token, upgraded); // replaces the old token and user
+    setUser(upgraded);
+    return upgraded;
+  }, []);
+
   const value = useMemo(
-    () => ({ user, loading, login, register, logout }),
-    [user, loading, login, register, logout],
+    () => ({ user, loading, login, register, logout, becomeOrganiser }),
+    [user, loading, login, register, logout, becomeOrganiser],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

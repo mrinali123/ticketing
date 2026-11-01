@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
+import jwt from 'jsonwebtoken';
 import User from '../src/models/User.js';
-import { api, createUser, tokenFor, PASSWORD } from './helpers.js';
+import { api, createUser, tokenFor, eventBody, PASSWORD } from './helpers.js';
 
 const newUser = { name: 'Asha', email: 'asha@test.com', password: PASSWORD };
 
@@ -121,5 +122,102 @@ describe('GET /api/auth/me', () => {
 
     expect(res.status).toBe(401);
     expect(res.body.message).toBe('Token expired, please log in again');
+  });
+});
+
+describe('POST /api/auth/become-organiser', () => {
+  const upgrade = (token, body = { organisationName: 'Chennai Music Society' }) =>
+    api().post('/api/auth/become-organiser').set('Authorization', `Bearer ${token}`).send(body);
+
+  it('upgrades the account and returns a NEW token whose role is organiser (200)', async () => {
+    const user = await createUser({ email: 'host@test.com' });
+    const oldToken = tokenFor(user);
+
+    const res = await upgrade(oldToken);
+
+    expect(res.status).toBe(200);
+    expect(res.body.user).toMatchObject({
+      _id: user._id.toString(),
+      role: 'organiser',
+      organisationName: 'Chennai Music Society',
+    });
+    expect(res.body.user).not.toHaveProperty('passwordHash');
+    expect(res.body.token).not.toBe(oldToken);
+    // Same token format as login: { sub, role }
+    expect(jwt.decode(res.body.token)).toMatchObject({
+      sub: user._id.toString(),
+      role: 'organiser',
+    });
+    expect(await User.findById(user._id)).toMatchObject({ role: 'organiser' });
+  });
+
+  it('the new token can create events, but the old token still cannot (it still says "user")', async () => {
+    const user = await createUser();
+    const oldToken = tokenFor(user);
+    const { body } = await upgrade(oldToken);
+
+    const withNew = await api()
+      .post('/api/events')
+      .set('Authorization', `Bearer ${body.token}`)
+      .send(eventBody());
+    const withOld = await api()
+      .post('/api/events')
+      .set('Authorization', `Bearer ${oldToken}`)
+      .send(eventBody());
+
+    expect(withNew.status).toBe(201);
+    expect(withOld.status).toBe(403);
+  });
+
+  it('rejects upgrading an account that is already an organiser (400)', async () => {
+    const user = await createUser();
+    const { body } = await upgrade(tokenFor(user));
+
+    const again = await upgrade(body.token);
+
+    expect(again.status).toBe(400);
+    expect(again.body.message).toMatch(/already an organiser/i);
+  });
+
+  it.each([
+    ['missing', {}],
+    ['too short', { organisationName: 'A' }],
+    ['only spaces', { organisationName: '    ' }],
+    ['too long', { organisationName: 'x'.repeat(81) }],
+    ['not text', { organisationName: 12345 }],
+  ])(
+    'rejects an organisation name that is %s (400) and leaves the role alone',
+    async (_n, body) => {
+      const user = await createUser();
+
+      const res = await upgrade(tokenFor(user), body);
+
+      expect(res.status).toBe(400);
+      expect((await User.findById(user._id)).role).toBe('user');
+    },
+  );
+
+  it('requires a token (401)', async () => {
+    const res = await api()
+      .post('/api/auth/become-organiser')
+      .send({ organisationName: 'Chennai Music Society' });
+
+    expect(res.status).toBe(401);
+  });
+
+  it('includes organisationName in /me and in the login response afterwards', async () => {
+    const user = await createUser({ email: 'host@test.com' });
+    const { body } = await upgrade(tokenFor(user));
+
+    const me = await api().get('/api/auth/me').set('Authorization', `Bearer ${body.token}`);
+    const login = await api()
+      .post('/api/auth/login')
+      .send({ email: 'host@test.com', password: PASSWORD });
+
+    expect(me.body.organisationName).toBe('Chennai Music Society');
+    expect(login.body.user).toMatchObject({
+      role: 'organiser',
+      organisationName: 'Chennai Music Society',
+    });
   });
 });

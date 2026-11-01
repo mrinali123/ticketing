@@ -5,7 +5,7 @@ import useTitle from '../hooks/useTitle.js';
 import Pagination from '../components/Pagination.jsx';
 import Notice from '../components/Notice.jsx';
 import { Loading } from '../components/PageState.jsx';
-import { formatDateTime, formatPrice } from '../utils/format.js';
+import { formatDateTime, formatPrice, hostName } from '../utils/format.js';
 
 const PAGE_SIZE = 9; // 3 rows of 3 cards on a wide screen
 
@@ -146,6 +146,7 @@ function EventCard({ event }) {
       <p className="mt-0.5 text-sm text-muted">
         {event.venue}, {event.city}
       </p>
+      {hostName(event) && <p className="mt-0.5 text-xs text-muted">By {hostName(event)}</p>}
       <p className="mt-3 text-sm">
         <span className="font-medium">{formatPrice(event.pricePaise)}</span>
         <span className="text-muted"> per seat</span>

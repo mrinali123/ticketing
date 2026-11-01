@@ -3,6 +3,9 @@ import Seat from '../models/Seat.js';
 import Booking from '../models/Booking.js';
 import { httpError } from '../errors/httpError.js';
 
+// Who's hosting an event, as shown on event pages. Only public fields: never the email.
+const ORGANISER_PUBLIC_FIELDS = 'name organisationName';
+
 // Loads an event and checks the logged-in organiser owns it
 async function getOwnedEvent(id, userId) {
   const event = await Event.findById(id); // invalid id → CastError, handled in the controller
@@ -52,7 +55,11 @@ export async function listEvents({ page, limit, city }) {
 
   // Run both queries at the same time instead of one after the other
   const [data, total] = await Promise.all([
-    Event.find(filter).sort({ startTime: 1 }).skip(skip).limit(limit), // soonest first
+    Event.find(filter)
+      .sort({ startTime: 1 }) // soonest first
+      .skip(skip)
+      .limit(limit)
+      .populate('organiser', ORGANISER_PUBLIC_FIELDS),
     Event.countDocuments(filter), // total matches, so the client knows how many pages exist
   ]);
 
@@ -102,7 +109,7 @@ export async function listMyEvents(organiserId) {
 }
 
 export async function getEventById(id) {
-  const event = await Event.findById(id);
+  const event = await Event.findById(id).populate('organiser', ORGANISER_PUBLIC_FIELDS);
 
   if (!event) throw httpError(404, 'Event not found'); // the controller turns this into the HTTP status
 

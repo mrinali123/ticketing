@@ -41,9 +41,18 @@ export default function Navbar() {
               )}
               {/* The divider only makes sense when everything fits on one line (wider screens) */}
               <span className="flex items-center gap-3 sm:border-l sm:border-line sm:pl-5">
-                <span className="max-w-[9rem] truncate text-sm text-muted" title={user.email}>
+                {/* The user's name opens their account page */}
+                <NavLink
+                  to="/account"
+                  title={`${user.email} (your account)`}
+                  className={({ isActive }) =>
+                    `max-w-[9rem] truncate text-sm no-underline hover:no-underline ${
+                      isActive ? 'font-medium text-accent' : 'text-muted hover:text-accent'
+                    }`
+                  }
+                >
                   {user.name}
-                </span>
+                </NavLink>
                 <button
                   type="button"
                   onClick={handleLogout}

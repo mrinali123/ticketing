@@ -55,9 +55,9 @@
 
 | Scenario                           | Requests | 201 | 409 | Other | Duration | p50      | p95      | Max      | Result  |
 | ---------------------------------- | -------- | --- | --- | ----- | -------- | -------- | -------- | -------- | ------- |
-| A: 500 users, 1 seat               | 500      | 1   | 499 | 0     | 35995 ms | 33864 ms | 35808 ms | 35888 ms | ✅ PASS |
-| C: 500 users, 1 already-taken seat | 500      | 0   | 500 | 0     | 7948 ms  | 5871 ms  | 7880 ms  | 7904 ms  | ✅ PASS |
-| B: 500 users, 100 seats            | 500      | 99  | 401 | 0     | 27972 ms | 25914 ms | 27863 ms | 27926 ms | ✅ PASS |
+| A: 500 users, 1 seat               | 500      | 1   | 499 | 0     | 35995 ms | 33864 ms | 35808 ms | 35888 ms | PASS |
+| C: 500 users, 1 already-taken seat | 500      | 0   | 500 | 0     | 7948 ms  | 5871 ms  | 7880 ms  | 7904 ms  | PASS |
+| B: 500 users, 100 seats            | 500      | 99  | 401 | 0     | 27972 ms | 25914 ms | 27863 ms | 27926 ms | PASS |
 
 Latency is per request, measured from sending to receiving the full response. Duration is the whole burst, from the first request to the last response.
 
@@ -65,32 +65,32 @@ Latency is per request, measured from sending to receiving the full response. Du
 
 **What it proves:** when 500 people try to grab the same seat at the same instant, exactly one gets it and everyone else is told it's taken (409). Nobody gets an error, and the database agrees with the responses. This is the double-booking race condition at its worst, and the atomic conditional update plus the transaction prevent it.
 
-- ✅ exactly 1 request got 201
-- ✅ exactly 499 requests got 409
-- ✅ no other responses (errors)
-- ✅ seat A1 is held by the winner's booking
-- ✅ only 1 booking exists in the DB
+- PASS: exactly 1 request got 201
+- PASS: exactly 499 requests got 409
+- PASS: no other responses (errors)
+- PASS: seat A1 is held by the winner's booking
+- PASS: only 1 booking exists in the DB
 
 ### B: 500 users, 100 seats
 
 **What it proves:** with many seats wanted at once (99 different seats requested, some by several people), every requested seat goes to exactly one person. The number of winners equals the number of different seats asked for, so no seat was lost or given out twice, and each winner's booking points at exactly the seat they asked for.
 
-- ✅ 201 count (99) == distinct seats requested (99)
-- ✅ 409 count (401) == requests minus winners (401)
-- ✅ no other responses (errors)
-- ✅ no seat belongs to more than one booking
-- ✅ every 201 booking owns exactly its requested seat
-- ✅ held seats in DB (99) == bookings (99) == 201s
+- PASS: 201 count (99) == distinct seats requested (99)
+- PASS: 409 count (401) == requests minus winners (401)
+- PASS: no other responses (errors)
+- PASS: no seat belongs to more than one booking
+- PASS: every 201 booking owns exactly its requested seat
+- PASS: held seats in DB (99) == bookings (99) == 201s
 
 ### C: 500 users, 1 already-taken seat
 
 **What it proves:** when a seat is already gone and 500 people still try for it, every one of them is turned away (409) and the existing booking is untouched. Because the seat is visibly taken, the fast-fail check answers without opening a single transaction, which is why this burst is quick.
 
-- ✅ seat A1 was already held when the burst started
-- ✅ no request got 201
-- ✅ all 500 requests got 409
-- ✅ no other responses (errors)
-- ✅ seat A1 still belongs to the same booking
-- ✅ still only 1 booking in the DB
+- PASS: seat A1 was already held when the burst started
+- PASS: no request got 201
+- PASS: all 500 requests got 409
+- PASS: no other responses (errors)
+- PASS: seat A1 still belongs to the same booking
+- PASS: still only 1 booking in the DB
 
 <!-- latest-run:end -->
