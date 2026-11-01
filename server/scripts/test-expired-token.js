@@ -36,7 +36,9 @@ const run = async () => {
   await mongoose.disconnect();
 
   if (!user) {
-    throw new Error(`No user with email ${TEST_EMAIL}. Send the Register request in auth.http first.`);
+    throw new Error(
+      `No user with email ${TEST_EMAIL}. Send the Register request in auth.http first.`,
+    );
   }
 
   // 2. Sign a token that expires in 2 seconds

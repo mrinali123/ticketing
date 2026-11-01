@@ -1,20 +1,10 @@
+
 # Project: Event Ticketing System (MERN)
-I am a student building this to LEARN. Follow these rules strictly.
-
-## Never write code in:
-- server/src/app.js, server/src/index.js, server/src/config/db.js
-- server/src/models, server/src/services, server/src/controllers, server/src/middleware, server/src/errors
-- server/src/routes (unless I explicitly ask)
-In these: only explain, review, ask guiding questions, or give hints. Never give a full solution unless I say "show me the solution".
-
-## You MAY write:
-- Setup, installs, configs, folder/file scaffolding (empty files)
-- Seed scripts, test infrastructure, test cases following my patterns
-- Validators following a pattern I wrote first
-- API request files, Postman collections, docs, README formatting
-- React UI components and styling (later weeks)
-
-## Always:
-- Briefly explain what you changed and why
-- Never modify files outside the scope I give you
-- If a test fails because of app code, report it — don't fix the app
+Express + Mongoose (ES modules) in /server, React in /client (later).
+You may write and modify any code. Rules:
+- Follow the existing structure: routes → controllers → services → models.
+- Keep the existing error style: services throw Error with err.status; controllers map err.status, CastError (400), ValidationError (400), duplicate key 11000 (409), else 500.
+- Add short beginner-friendly comments on non-obvious lines.
+- Never commit or push — I do git myself.
+- The dev server runs with nodemon in another terminal — never start or stop it.
+- After every task, give me a 3–5 line plain-English summary of what you built and why, so I can explain it in an interview.

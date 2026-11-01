@@ -79,3 +79,47 @@ GET {{baseUrl}}/api/events/abc
 
 ### Get event that doesn't exist: valid ObjectId format but no such event (expect 404)
 GET {{baseUrl}}/api/events/000000000000000000000000
+
+### Second organiser login: a different seeded organiser, used to test ownership checks (expect 200 + token)
+# @name orgLogin2
+POST {{baseUrl}}/api/auth/login
+Content-Type: application/json
+
+{
+  "email": "ravi@example.com",
+  "password": "Password123!"
+}
+
+### Update event as owner: the organiser who created it can change allowed fields (expect 200 with updated event)
+PATCH {{baseUrl}}/api/events/{{createEvent.response.body._id}}
+Authorization: Bearer {{orgLogin.response.body.token}}
+Content-Type: application/json
+
+{
+  "title": "Test Concert (Updated)",
+  "pricePaise": 59900
+}
+
+### Update event as a different organiser: right role but not the owner (expect 403 "You don't own this event")
+PATCH {{baseUrl}}/api/events/{{createEvent.response.body._id}}
+Authorization: Bearer {{orgLogin2.response.body.token}}
+Content-Type: application/json
+
+{
+  "title": "Hijacked Title"
+}
+
+### Update event with empty body: no allowed fields to change (expect 400)
+PATCH {{baseUrl}}/api/events/{{createEvent.response.body._id}}
+Authorization: Bearer {{orgLogin.response.body.token}}
+Content-Type: application/json
+
+{}
+
+### Cancel event as owner: marks the event and its active bookings as cancelled (expect 200)
+POST {{baseUrl}}/api/events/{{createEvent.response.body._id}}/cancel
+Authorization: Bearer {{orgLogin.response.body.token}}
+
+### Cancel event again: an already-cancelled event can't be cancelled twice (expect 400)
+POST {{baseUrl}}/api/events/{{createEvent.response.body._id}}/cancel
+Authorization: Bearer {{orgLogin.response.body.token}}

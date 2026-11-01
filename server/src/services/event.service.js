@@ -1,5 +1,25 @@
-import Event from "../models/Event.js";
-import Seat from "../models/Seat.js";
+import Event from '../models/Event.js';
+import Seat from '../models/Seat.js';
+import Booking from '../models/Booking.js';
+
+// Small helper so every "not found / not allowed" error looks the same
+function httpError(status, message) {
+  const err = new Error(message);
+  err.status = status;
+  return err;
+}
+
+// Loads an event and checks the logged-in organiser owns it
+async function getOwnedEvent(id, userId) {
+  const event = await Event.findById(id); // invalid id → CastError, handled in the controller
+  if (!event) throw httpError(404, 'Event not found');
+
+  // organiser is an ObjectId and userId is a string, so compare them as strings
+  if (event.organiser.toString() !== userId) {
+    throw httpError(403, "You don't own this event");
+  }
+  return event;
+}
 
 export async function createEvent(organiserId, data) {
   // Save the event, owned by the logged-in organiser
@@ -22,7 +42,7 @@ export async function createEvent(organiserId, data) {
 
 export async function listEvents({ page, limit, city }) {
   // Only upcoming events that haven't been cancelled
-  const filter = { status: "scheduled", startTime: { $gte: new Date() } };
+  const filter = { status: 'scheduled', startTime: { $gte: new Date() } };
   if (city) filter.city = city; // optional city filter
 
   const skip = (page - 1) * limit; // page 1 skips 0, page 2 skips `limit`, ...
@@ -40,15 +60,45 @@ export async function getEventById(id) {
   const event = await Event.findById(id);
 
   if (!event) {
-    const err = new Error("Event not found");
+    const err = new Error('Event not found');
     err.status = 404; // the controller turns this into the HTTP status
     throw err;
   }
 
   // Only send the seat fields the client needs, in seat-map order (A1, A2, ... B1, ...)
   const seats = await Seat.find({ event: event._id })
-    .select("label row number status")
+    .select('label row number status')
     .sort({ row: 1, number: 1 });
 
   return { event, seats };
+}
+
+export async function updateEvent(id, userId, updates) {
+  const event = await getOwnedEvent(id, userId);
+
+  // Copy the allowed changes onto the document, then save.
+  // save() (unlike findByIdAndUpdate) runs all schema validators, e.g. price min 0.
+  Object.assign(event, updates);
+  await event.save();
+
+  return event;
+}
+
+export async function cancelEvent(id, userId) {
+  const event = await getOwnedEvent(id, userId);
+
+  if (event.status === 'cancelled') {
+    throw httpError(400, 'Event is already cancelled');
+  }
+
+  event.status = 'cancelled';
+  await event.save();
+
+  // Cancel every booking that was still active for this event
+  const result = await Booking.updateMany(
+    { event: event._id, status: { $in: ['pending', 'confirmed'] } },
+    { status: 'cancelled' },
+  );
+
+  return { event, bookingsCancelled: result.modifiedCount };
 }

@@ -36,7 +36,7 @@ const seatSchema = new mongoose.Schema(
   },
   {
     timestamps: true,
-  }
+  },
 );
 
 // Compound unique index: prevents duplicate seats (e.g., two "A5" seats for the same event)

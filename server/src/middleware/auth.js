@@ -1,23 +1,23 @@
 // server/src/middleware/auth.js
-import jwt from "jsonwebtoken";
+import jwt from 'jsonwebtoken';
 
 export function requireAuth(req, res, next) {
   const header = req.headers.authorization;
-  if (!header || !header.startsWith("Bearer ")) {
-    return res.status(401).json({ message: "Not logged in" });
+  if (!header || !header.startsWith('Bearer ')) {
+    return res.status(401).json({ message: 'Not logged in' });
   }
-  const token = header.split(" ")[1];
+  const token = header.split(' ')[1];
   try {
     const payload = jwt.verify(token, process.env.JWT_SECRET);
     req.user = { id: payload.sub, role: payload.role };
     next();
   } catch (err) {
     // 👉 TASK 1: Handle expired tokens specifically
-    if (err.name === "TokenExpiredError") {
-      return res.status(401).json({ message: "Token expired, please log in again" });
+    if (err.name === 'TokenExpiredError') {
+      return res.status(401).json({ message: 'Token expired, please log in again' });
     }
-    
-    return res.status(401).json({ message: "Invalid token" });
+
+    return res.status(401).json({ message: 'Invalid token' });
   }
 }
 
