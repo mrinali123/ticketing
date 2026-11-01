@@ -1,0 +1,81 @@
+@baseUrl = http://localhost:5000
+
+### Organiser login: signs in as a seeded organiser so we can create events (expect 200 + token)
+# @name orgLogin
+POST {{baseUrl}}/api/auth/login
+Content-Type: application/json
+
+{
+  "email": "asha@example.com",
+  "password": "Password123!"
+}
+
+### User login: signs in as a normal user to test role checks (expect 200 + token; register test@example.com in auth.http first)
+# @name userLogin
+POST {{baseUrl}}/api/auth/login
+Content-Type: application/json
+
+{
+  "email": "test@example.com",
+  "password": "Password123!"
+}
+
+### Create event as organiser: organisers are allowed to create events (expect 201)
+# @name createEvent
+POST {{baseUrl}}/api/events
+Authorization: Bearer {{orgLogin.response.body.token}}
+Content-Type: application/json
+
+{
+  "title": "Test Concert",
+  "venue": "VIT Auditorium",
+  "city": "Chennai",
+  "startTime": "{{$datetime iso8601 1 M}}",
+  "rows": 5,
+  "seatsPerRow": 8,
+  "pricePaise": 49900
+}
+
+### Create event as normal user: logged in but wrong role, so it must be forbidden (expect 403)
+POST {{baseUrl}}/api/events
+Authorization: Bearer {{userLogin.response.body.token}}
+Content-Type: application/json
+
+{
+  "title": "Test Concert",
+  "venue": "VIT Auditorium",
+  "city": "Chennai",
+  "startTime": "{{$datetime iso8601 1 M}}",
+  "rows": 5,
+  "seatsPerRow": 8,
+  "pricePaise": 49900
+}
+
+### Create event with missing title: validation must reject incomplete data (expect 400)
+POST {{baseUrl}}/api/events
+Authorization: Bearer {{orgLogin.response.body.token}}
+Content-Type: application/json
+
+{
+  "venue": "VIT Auditorium",
+  "city": "Chennai",
+  "startTime": "{{$datetime iso8601 1 M}}",
+  "rows": 5,
+  "seatsPerRow": 8,
+  "pricePaise": 49900
+}
+
+### List events: public list of all events, no login needed (expect 200)
+GET {{baseUrl}}/api/events
+
+### List events with filter + pagination: only Chennai events, first page of 5 (expect 200)
+GET {{baseUrl}}/api/events?city=Chennai&page=1&limit=5
+
+### Get one event: fetches the event created above, including its seat map (expect 200 with 40 seats = 5 rows × 8; send Create event first)
+GET {{baseUrl}}/api/events/{{createEvent.response.body._id}}
+
+### Get event with invalid id: "abc" is not a valid ObjectId (expect 400)
+GET {{baseUrl}}/api/events/abc
+
+### Get event that doesn't exist: valid ObjectId format but no such event (expect 404)
+GET {{baseUrl}}/api/events/000000000000000000000000

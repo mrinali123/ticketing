@@ -1,0 +1,32 @@
+@baseUrl = http://localhost:5000
+
+### Register: creates a new user account (should return 201; run twice to test duplicate-email handling)
+POST {{baseUrl}}/api/auth/register
+Content-Type: application/json
+
+{
+  "name": "Test User",
+  "email": "test@example.com",
+  "password": "Password123!"
+}
+
+### Login: signs in with the account registered above (should return a JWT on success)
+# @name login
+POST {{baseUrl}}/api/auth/login
+Content-Type: application/json
+
+{
+  "email": "test@example.com",
+  "password": "Password123!"
+}
+
+### Me (valid token): uses the token from the login request above (should return 200 with the current user; send Login first)
+GET {{baseUrl}}/api/auth/me
+Authorization: Bearer {{login.response.body.token}}
+
+### Me (no token): request without an Authorization header (should be rejected with 401)
+GET {{baseUrl}}/api/auth/me
+
+### Me (fake token): request with an invalid, unsigned token (should be rejected with 401)
+GET {{baseUrl}}/api/auth/me
+Authorization: Bearer faketoken123
