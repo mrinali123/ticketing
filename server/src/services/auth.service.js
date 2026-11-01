@@ -32,3 +32,12 @@ export async function loginUser({ email, password }) {
     user: { _id: user._id, name: user.name, email: user.email, role: user.role },
   };
 }
+export async function getMe(userId) {
+  const user = await User.findById(userId);
+  if (!user) {
+    const err = new Error("User not found");
+    err.status = 404;
+    throw err;
+  }
+  return user;
+}

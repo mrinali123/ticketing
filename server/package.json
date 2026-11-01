@@ -10,7 +10,8 @@
     "start": "node src/index.js",
     "lint": "eslint .",
     "format": "prettier --write .",
-    "seed": "node scripts/seed.js"
+    "seed": "node scripts/seed.js",
+    "test:expiry": "node scripts/test-expired-token.js"
   },
   "keywords": [],
   "author": "",
