@@ -5,6 +5,7 @@ import request from 'supertest';
 import app from '../src/app.js';
 import User from '../src/models/User.js';
 import Event from '../src/models/Event.js';
+import { createEvent } from '../src/services/event.service.js';
 
 export const PASSWORD = 'Password123!';
 
@@ -54,4 +55,10 @@ export const eventBody = (overrides = {}) => ({
 export function insertEvent(organiser, overrides = {}) {
   const { startTime, ...rest } = eventBody(overrides);
   return Event.create({ ...rest, startTime: new Date(startTime), organiser: organiser._id });
+}
+
+// Creates an event WITH its seat map, using the real service (faster than going through HTTP)
+export async function createEventWithSeats(organiser, overrides = {}) {
+  const { startTime, ...rest } = eventBody(overrides);
+  return createEvent(organiser._id, { ...rest, startTime: new Date(startTime) });
 }

@@ -1,13 +1,7 @@
 import Event from '../models/Event.js';
 import Seat from '../models/Seat.js';
 import Booking from '../models/Booking.js';
-
-// Small helper so every "not found / not allowed" error looks the same
-function httpError(status, message) {
-  const err = new Error(message);
-  err.status = status;
-  return err;
-}
+import { httpError } from '../errors/httpError.js';
 
 // Loads an event and checks the logged-in organiser owns it
 async function getOwnedEvent(id, userId) {
@@ -59,16 +53,20 @@ export async function listEvents({ page, limit, city }) {
 export async function getEventById(id) {
   const event = await Event.findById(id);
 
-  if (!event) {
-    const err = new Error('Event not found');
-    err.status = 404; // the controller turns this into the HTTP status
-    throw err;
-  }
+  if (!event) throw httpError(404, 'Event not found'); // the controller turns this into the HTTP status
 
-  // Only send the seat fields the client needs, in seat-map order (A1, A2, ... B1, ...)
-  const seats = await Seat.find({ event: event._id })
-    .select('label row number status')
-    .sort({ row: 1, number: 1 });
+  // Seat-map order (A1, A2, ... B1, ...). lean() returns plain objects we can adjust below.
+  const rawSeats = await Seat.find({ event: event._id })
+    .select('label row number status holdExpiresAt')
+    .sort({ row: 1, number: 1 })
+    .lean();
+
+  // A hold whose time has run out is free to book (the hold query treats it that way too),
+  // so show it as "available" even if the cleanup job hasn't reset it yet.
+  const now = new Date();
+  const seats = rawSeats.map(({ holdExpiresAt, ...seat }) =>
+    seat.status === 'held' && holdExpiresAt < now ? { ...seat, status: 'available' } : seat,
+  );
 
   return { event, seats };
 }
