@@ -4,6 +4,10 @@ An event ticketing app where people pick seats on a live seat map and book them,
 
 **Live demo:** https://myseat-app.vercel.app
 
+![MySeat seat map: pick seats row by row, with selected, held and booked seats in different colours](docs/screenshots/seat-map.png)
+
+_Picking seats on the live seat map. Green seats are selected, amber ones are held by other people, grey ones are booked._
+
 > The API runs on Render's free plan, which sleeps when nobody has used it for a while. The first visit can take **about a minute** while it wakes up; the events page says so when it happens. After that it's quick.
 
 ### Demo accounts
@@ -165,17 +169,27 @@ Booking statuses: `pending` (held) → `confirmed`, or `expired` (hold ran out) 
 
 ## Screenshots
 
-| Events                                      | Seat map                                   |
-| ------------------------------------------- | ------------------------------------------ |
-| ![Events list](docs/screenshots/events.png) | ![Seat map](docs/screenshots/seat-map.png) |
+In the order a visitor goes through the app.
 
-| Checkout                                   | Ticket                                 |
-| ------------------------------------------ | -------------------------------------- |
-| ![Checkout](docs/screenshots/checkout.png) | ![Ticket](docs/screenshots/ticket.png) |
+**1. Events.** Upcoming events with the host, date, venue and price per seat, a city filter and pages.
 
-| Organiser dashboard                                    |
-| ------------------------------------------------------ |
-| ![Organiser dashboard](docs/screenshots/organiser.png) |
+![Events list with event cards and a city filter](docs/screenshots/events.png)
+
+**2. Seat map.** Pick up to 6 seats; the map refreshes every 5 seconds so other people's holds appear.
+
+![Seat map with selected, held and booked seats](docs/screenshots/seat-map.png)
+
+**3. Checkout.** Seats are held for 5 minutes while you pay. Payment is simulated.
+
+![Checkout page with a hold countdown and the total](docs/screenshots/checkout.png)
+
+**4. Ticket.** After confirming, the booking is shown as a simple ticket stub.
+
+![Ticket stub with event, seats, amount paid and booking id](docs/screenshots/ticket.png)
+
+**5. Organiser dashboard.** Organisers see their events with available, held and booked seat counts, and can edit or cancel them.
+
+![Organiser dashboard with an events table and seat counts](docs/screenshots/organiser.png)
 
 ## More docs
 
