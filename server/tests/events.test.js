@@ -2,7 +2,14 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import Event from '../src/models/Event.js';
 import Seat from '../src/models/Seat.js';
 import Booking from '../src/models/Booking.js';
-import { api, createUserWithToken, eventBody, insertEvent, daysFromNow } from './helpers.js';
+import {
+  api,
+  createUserWithToken,
+  createEventWithSeats,
+  eventBody,
+  insertEvent,
+  daysFromNow,
+} from './helpers.js';
 
 // Logged-in users shared by most tests (recreated before each test, since the DB is wiped)
 let organiser, otherOrganiser, normalUser;
@@ -51,6 +58,20 @@ describe('POST /api/events', () => {
     expect(res.body.status).toBe('scheduled');
   });
 
+  it.each([
+    ['more than 26 rows', { rows: 27 }],
+    ['more than 50 seats per row', { seatsPerRow: 51 }],
+  ])('rejects %s (400) and creates no seats', async (_name, overrides) => {
+    const res = await api()
+      .post('/api/events')
+      .set('Authorization', organiser.auth)
+      .send(eventBody(overrides));
+
+    expect(res.status).toBe(400);
+    expect(await Event.countDocuments()).toBe(0);
+    expect(await Seat.countDocuments()).toBe(0);
+  });
+
   it('allows a free event (pricePaise 0)', async () => {
     const res = await api()
       .post('/api/events')
@@ -88,6 +109,21 @@ describe('POST /api/events', () => {
       expect(await Event.countDocuments()).toBe(0);
     },
   );
+});
+
+describe('GET /api/events/cities', () => {
+  it('lists each city with an upcoming scheduled event once, A to Z', async () => {
+    await insertEvent(organiser.user, { city: 'Pune' });
+    await insertEvent(organiser.user, { city: 'Chennai' });
+    await insertEvent(organiser.user, { city: 'Chennai' });
+    await insertEvent(organiser.user, { city: 'Goa', status: 'cancelled' });
+    await insertEvent(organiser.user, { city: 'Delhi', startTime: daysFromNow(-1).toISOString() });
+
+    const res = await api().get('/api/events/cities');
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual(['Chennai', 'Pune']);
+  });
 });
 
 describe('GET /api/events', () => {
@@ -272,5 +308,73 @@ describe('POST /api/events/:id/cancel', () => {
 
     expect(res.status).toBe(403);
     expect((await Event.findById(event._id)).status).toBe('scheduled');
+  });
+});
+
+describe('GET /api/events/mine', () => {
+  const getMine = (who) => api().get('/api/events/mine').set('Authorization', who.auth);
+
+  it("returns only the organiser's own events, any status, newest first", async () => {
+    const first = await insertEvent(organiser.user, { title: 'First' });
+    const cancelled = await insertEvent(organiser.user, {
+      title: 'Cancelled',
+      status: 'cancelled',
+    });
+    const past = await insertEvent(organiser.user, {
+      title: 'Past',
+      startTime: daysFromNow(-5).toISOString(),
+    });
+    await insertEvent(otherOrganiser.user, { title: 'Not mine' });
+
+    const res = await getMine(organiser);
+
+    expect(res.status).toBe(200);
+    // Inserted one after another, so newest first = reverse order
+    expect(res.body.map((e) => e._id)).toEqual([
+      past._id.toString(),
+      cancelled._id.toString(),
+      first._id.toString(),
+    ]);
+  });
+
+  it('includes seat counts by status, counting expired holds as available', async () => {
+    const event = await createEventWithSeats(organiser.user, { rows: 2, seatsPerRow: 5 });
+    const future = daysFromNow(1);
+    const past = daysFromNow(-1);
+    await Seat.updateOne({ event: event._id, label: 'A1' }, { status: 'booked' });
+    await Seat.updateOne({ event: event._id, label: 'A2' }, { status: 'booked' });
+    await Seat.updateOne(
+      { event: event._id, label: 'A3' },
+      { status: 'held', holdExpiresAt: future },
+    );
+    await Seat.updateOne(
+      { event: event._id, label: 'A4' },
+      { status: 'held', holdExpiresAt: past },
+    );
+
+    const res = await getMine(organiser);
+
+    expect(res.status).toBe(200);
+    expect(res.body[0].seatCounts).toEqual({ available: 7, held: 1, booked: 2 });
+  });
+
+  it('gives zero counts for an event without seats', async () => {
+    await insertEvent(organiser.user);
+
+    const res = await getMine(organiser);
+
+    expect(res.body[0].seatCounts).toEqual({ available: 0, held: 0, booked: 0 });
+  });
+
+  it('returns an empty list for an organiser with no events', async () => {
+    const res = await getMine(otherOrganiser);
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual([]);
+  });
+
+  it('forbids normal users (403) and requires a token (401)', async () => {
+    expect((await getMine(normalUser)).status).toBe(403);
+    expect((await api().get('/api/events/mine')).status).toBe(401);
   });
 });

@@ -34,11 +34,13 @@ const eventSchema = new mongoose.Schema(
       type: Number,
       required: [true, 'Please add the number of rows'],
       min: [1, 'Rows must be at least 1'],
+      max: [26, 'Rows can be at most 26 (rows are labelled A to Z)'],
     },
     seatsPerRow: {
       type: Number,
       required: [true, 'Please add the number of seats per row'],
       min: [1, 'Seats per row must be at least 1'],
+      max: [50, 'Seats per row can be at most 50'],
     },
     pricePaise: {
       type: Number,

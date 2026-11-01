@@ -34,6 +34,15 @@ export async function createEvent(organiserId, data) {
   return event;
 }
 
+// Cities that have at least one upcoming event, A to Z (fills the city filter dropdown)
+export async function listCities() {
+  const cities = await Event.distinct('city', {
+    status: 'scheduled',
+    startTime: { $gte: new Date() },
+  });
+  return cities.sort((a, b) => a.localeCompare(b));
+}
+
 export async function listEvents({ page, limit, city }) {
   // Only upcoming events that haven't been cancelled
   const filter = { status: 'scheduled', startTime: { $gte: new Date() } };
@@ -48,6 +57,48 @@ export async function listEvents({ page, limit, city }) {
   ]);
 
   return { data, page, limit, total };
+}
+
+export async function listMyEvents(organiserId) {
+  // All of this organiser's events, any status, newest first
+  // (_id breaks ties when two events were created in the same millisecond)
+  const events = await Event.find({ organiser: organiserId })
+    .sort({ createdAt: -1, _id: -1 })
+    .lean();
+
+  // Count seats per event and status in ONE database query instead of one query per event.
+  // An expired hold counts as "available", the same way the event page shows it.
+  const counts = await Seat.aggregate([
+    { $match: { event: { $in: events.map((e) => e._id) } } },
+    {
+      $group: {
+        _id: {
+          event: '$event',
+          status: {
+            $cond: [
+              { $and: [{ $eq: ['$status', 'held'] }, { $lt: ['$holdExpiresAt', new Date()] }] },
+              'available',
+              '$status',
+            ],
+          },
+        },
+        count: { $sum: 1 },
+      },
+    },
+  ]);
+
+  // Turn the grouped rows into { eventId: { available, held, booked } }
+  const byEvent = {};
+  for (const { _id, count } of counts) {
+    const key = _id.event.toString();
+    byEvent[key] ??= { available: 0, held: 0, booked: 0 };
+    byEvent[key][_id.status] = count;
+  }
+
+  return events.map((e) => ({
+    ...e,
+    seatCounts: byEvent[e._id.toString()] ?? { available: 0, held: 0, booked: 0 },
+  }));
 }
 
 export async function getEventById(id) {

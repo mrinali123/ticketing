@@ -1,6 +1,8 @@
 import {
   createEvent,
   listEvents,
+  listCities as listCitiesService, // renamed: the controller below is also called listCities
+  listMyEvents,
   getEventById,
   updateEvent,
   cancelEvent,
@@ -47,6 +49,16 @@ export async function create(req, res) {
   }
 }
 
+export async function listCities(req, res) {
+  try {
+    const cities = await listCitiesService();
+    return res.status(200).json(cities);
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ message: 'Something went wrong' });
+  }
+}
+
 export async function list(req, res) {
   try {
     // Query strings are always text, so convert to numbers and keep them in a safe range
@@ -56,6 +68,16 @@ export async function list(req, res) {
 
     const result = await listEvents({ page, limit, city });
     return res.status(200).json(result);
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ message: 'Something went wrong' });
+  }
+}
+
+export async function listMine(req, res) {
+  try {
+    const events = await listMyEvents(req.user.id);
+    return res.status(200).json(events);
   } catch (err) {
     console.error(err);
     return res.status(500).json({ message: 'Something went wrong' });
